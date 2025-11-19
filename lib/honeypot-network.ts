@@ -82,6 +82,42 @@ export function generateHoneypotData(trapType: string): any {
 }
 
 /**
+ * Generate a fake stack trace to confuse attackers
+ */
+export function generateFakeStackTrace(): string {
+  const errors = [
+    'Error: Database connection failed at /var/www/html/internal/db.js:42:15',
+    'TypeError: Cannot read property "admin" of undefined at /app/server/auth/middleware.js:128:22',
+    'ReferenceError: SECRET_KEY is not defined at /opt/api/config/secrets.ts:15:5',
+    'SyntaxError: Unexpected token < in JSON at position 0 at /usr/src/app/api/parser.js:88:12'
+  ]
+  return errors[Math.floor(Math.random() * errors.length)]
+}
+
+/**
+ * Detect malicious payloads in request body
+ */
+export function detectPayloadThreats(body: any): string[] {
+  const threats: string[] = []
+  const payloadStr = JSON.stringify(body).toLowerCase()
+
+  if (payloadStr.includes('union select') || payloadStr.includes('or 1=1')) {
+    threats.push('SQL Injection')
+  }
+  if (payloadStr.includes('..//') || payloadStr.includes('../')) {
+    threats.push('Directory Traversal')
+  }
+  if (payloadStr.includes('<script>') || payloadStr.includes('javascript:')) {
+    threats.push('XSS')
+  }
+  if (payloadStr.includes('eval(') || payloadStr.includes('exec(')) {
+    threats.push('Remote Code Execution')
+  }
+
+  return threats
+}
+
+/**
  * Log honeypot trap trigger
  */
 export async function logHoneypotTrap(
@@ -156,7 +192,22 @@ export async function generateHoneypotResponse(
   await logHoneypotTrap(request, trap.path, trap.trapType)
 
   // Generate fake data
-  const fakeData = generateHoneypotData(trap.trapType)
+  let fakeData = generateHoneypotData(trap.trapType)
+
+  // For config, admin, and credential traps, sometimes return a fake stack trace to leak "internal" paths
+  // This makes attackers think they found a vulnerability (Information Disclosure)
+  if (['config', 'admin', 'credential'].includes(trap.trapType) && Math.random() > 0.6) {
+    return new NextResponse(
+      JSON.stringify({
+        error: 'Internal Server Error',
+        message: 'Unhandled exception in authentication middleware',
+        stack: generateFakeStackTrace(),
+        debug_trace: `0x${Math.floor(Math.random() * 16777215).toString(16).toUpperCase()}`,
+        server_time: new Date().toISOString()
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
 
   // Add realistic headers to make it look legitimate
   const response = NextResponse.json(fakeData, { status: 200 })

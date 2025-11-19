@@ -1,6 +1,11 @@
 import mongoose from 'mongoose'
+import { logger } from './logger'
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://2200031385:Sarwansai@cluster0.zymg6z3.mongodb.net/healthportal?retryWrites=true&w=majority&appName=Cluster0'
+if (!process.env.MONGODB_URI) {
+  throw new Error('Please define MONGODB_URI environment variable in .env.local')
+}
+
+const MONGODB_URI = process.env.MONGODB_URI
 
 interface MongooseCache {
   conn: typeof mongoose | null
@@ -33,11 +38,11 @@ async function connectDB(): Promise<typeof mongoose> {
 
     cached.promise = mongoose.connect(MONGODB_URI, opts)
       .then((mongoose) => {
-        console.log('✅ MongoDB connected successfully')
+        logger.database('MongoDB connected successfully')
         return mongoose
       })
       .catch((error) => {
-        console.error('❌ MongoDB connection error:', error)
+        logger.error('MongoDB connection error', error)
         cached.promise = null
         throw error
       })

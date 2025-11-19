@@ -275,8 +275,7 @@ export default function MedicalRecordsPage() {
         />
       ) : (
         <div className="space-y-4">
-        {
-          filteredRecords.map(record => (
+          {filteredRecords.map(record => (
             <Card key={record.id} className="border-border/50 hover:shadow-md transition-shadow">
               <CardContent className="pt-6">
                 <div className="flex items-start justify-between gap-4">
@@ -328,11 +327,11 @@ export default function MedicalRecordsPage() {
                 </div>
               </CardContent>
             </Card>
-          ))
+          ))}
         </div>
       )}
 
-      {/* Add Record Dialog */
+      {/* Add Record Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>

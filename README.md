@@ -1,44 +1,66 @@
-# Team Healthcare Portal
+# Healthcare Management System with Advanced Security
 
-Lightweight, demo Next.js + TypeScript portal for appointments, medical records, vaccinations, and admin features.
+A secure, HIPAA-compliant healthcare management system featuring advanced bot detection, honeypot networks, and comprehensive audit logging.
 
-This README is intentionally concise — it focuses on what a maintainer or reviewer needs to run and push the repository.
+## 🛡️ Security Features
 
-Quick Links
-- Source: `app/`
-- Components: `components/`
-- Server helpers: `lib/`
+This project implements defense-in-depth security measures:
 
-Requirements
-- Node.js 18+ (LTS recommended)
-- npm (or pnpm/yarn)
+-   **Advanced Honeypot Network**:
+    -   Decoy API endpoints (`/api/admin/*`, `/api/auth/*`) to trap bots.
+    -   Fake stack traces and "leaked" internal paths to confuse attackers.
+    -   Payload inspection to detect SQLi, XSS, and RCE attempts.
+    -   Aggressive tarpitting (delays) for malicious requests.
+-   **Bot Detection**: Behavioral analysis (mouse movements, typing speed) to distinguish humans from bots.
+-   **Security Headers**: Strict CSP, HSTS, and anti-sniffing headers.
+-   **Audit Logging**: detailed logs of all security-relevant events.
 
-Local development
-1. Install dependencies:
-```powershell
-npm install
-```
-2. Start dev server:
-```powershell
+## 🚀 Getting Started
+
+### Prerequisites
+
+-   Node.js 18+
+-   npm or pnpm
+
+### Installation
+
+1.  Clone the repository:
+    ```bash
+    git clone <repository-url>
+    ```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
+3.  Set up environment variables:
+    ```bash
+    cp .env.example .env.local
+    ```
+4.  Enable the Honeypot (optional):
+    Add `ENABLE_HONEYPOT=true` to your `.env.local` file.
+
+### Running the Project
+
+```bash
 npm run dev
 ```
-3. Open browser: `http://localhost:3000`
 
-Preparing repository for GitHub
-- Remove local build artifacts and node modules before committing.
-- Use the included scripts:
-```powershell
-.\clean-repo.ps1            # interactive cleaner
-.\prepare-to-push.ps1 -Force -RemoteUrl "https://github.com/sarwansai8/Team.git"   # one-step non-interactive
-```
+## 🧪 Security Testing
 
-Security
-- Do not commit any `.env*` files. `.env.local` should remain local and is excluded by `.gitignore`.
+You can verify the security features using the included tools:
 
-Contributing
-- Open an issue or send a pull request. This repo is a demo and contributions are welcome.
+-   **Trigger a Honeypot**: Visit `/api/admin/config` to see the decoy response (and potential fake stack trace).
+-   **Run Security Audit**: `npm run audit`
 
----
+## 📂 Project Structure
 
-If you want this README expanded with screenshots, architecture diagrams, or a contributor guide, tell me which sections to add and I'll generate them.
-# Team
+-   `app/`: Next.js application routes.
+-   `lib/`: Core logic, including `honeypot-network.ts` and `security-monitor.ts`.
+-   `components/`: React components.
+-   `security-logs/`: Storage for detected threats and honeypot triggers.
+-   `_docs_archive/`: Archived documentation and setup scripts.
+
+## 🔒 Security Policy
+
+Please refer to [SECURITY.md](SECURITY.md) for our vulnerability disclosure policy and supported versions.
+

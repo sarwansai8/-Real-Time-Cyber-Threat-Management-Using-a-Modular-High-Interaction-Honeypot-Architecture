@@ -21,6 +21,7 @@ export interface PatientProfile {
 
 interface AuthContextType {
   user: PatientProfile | null
+  isLoggedIn: boolean
   setUser: (user: PatientProfile | null) => void
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, profile: Omit<PatientProfile, 'id' | 'registeredDate'>) => Promise<void>
@@ -108,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoggedIn: !!user, setUser, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )
