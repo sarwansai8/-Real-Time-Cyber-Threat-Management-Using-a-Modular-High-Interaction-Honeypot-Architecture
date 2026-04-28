@@ -1,42 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
 import connectDB from '@/lib/db'
 import { HealthUpdate } from '@/lib/models'
+import { logAudit } from '@/lib/audit-logger'
+import {
+  healthUpdateSchema,
+  healthUpdateUpdateSchema,
+  mongoIdSchema,
+  sanitizeObject,
+  validateRequest,
+} from '@/lib/validations'
+import { getAuthenticatedUser, getClientIp, getUserAgent, isAdmin } from '@/lib/auth'
+import { escapeRegex } from '@/lib/utils'
+import type { HealthUpdateSummary } from '@/lib/types'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-
-function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value || 
-                 request.headers.get('authorization')?.replace('Bearer ', '')
-  
-  if (!token) return null
-  
-  try {
-    return jwt.verify(token, JWT_SECRET) as any
-  } catch {
-    return null
+function serializeHealthUpdate(update: any): HealthUpdateSummary {
+  return {
+    id: String(update._id),
+    title: update.title,
+    summary: update.summary,
+    content: update.content,
+    category: update.category,
+    severity: update.severity,
+    publishedDate: new Date(update.publishedDate).toISOString(),
+    publishedBy: update.publishedBy,
+    status: update.status,
+    region: update.region,
+    views: update.views || 0,
+    savedCount: update.savedCount || 0,
   }
 }
 
-// GET - Fetch all health updates (admin) or user-specific (regular user)
 export async function GET(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const user = getAuthenticatedUser(request)
+    const canManageAll = isAdmin(user)
 
     await connectDB()
-    
-    // Admin can see all updates, users see only active updates
-    const query = user.role === 'admin' ? {} : { status: 'active' }
-    
+
+    const { searchParams } = new URL(request.url)
+    const search = searchParams.get('search')?.trim() || ''
+    const category = searchParams.get('category')?.trim() || ''
+    const severity = searchParams.get('severity')?.trim() || ''
+    const status = searchParams.get('status')?.trim() || ''
+
+    const query: Record<string, unknown> = canManageAll ? {} : { status: 'published' }
+
+    if (category && category !== 'all') {
+      query.category = category
+    }
+
+    if (severity && severity !== 'all') {
+      query.severity = severity
+    }
+
+    if (canManageAll && status && status !== 'all') {
+      query.status = status
+    }
+
+    if (search) {
+      const pattern = escapeRegex(search)
+      query.$or = [
+        { title: { $regex: pattern, $options: 'i' } },
+        { summary: { $regex: pattern, $options: 'i' } },
+        { content: { $regex: pattern, $options: 'i' } },
+      ]
+    }
+
     const updates = await HealthUpdate.find(query)
-      .sort({ createdAt: -1 })
+      .sort({ publishedDate: -1, createdAt: -1 })
       .lean()
 
-    return NextResponse.json({ success: true, updates })
-
+    return NextResponse.json({
+      success: true,
+      updates: updates.map(serializeHealthUpdate),
+      count: updates.length,
+    })
   } catch (error: any) {
     console.error('Fetch health updates error:', error)
     return NextResponse.json(
@@ -46,25 +84,43 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create new health update (admin only)
 export async function POST(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user || user.role !== 'admin') {
+    const user = getAuthenticatedUser(request)
+    if (!isAdmin(user)) {
       return NextResponse.json({ error: 'Unauthorized - Admin only' }, { status: 403 })
     }
 
     await connectDB()
-    
+
     const body = await request.json()
-    
+    const validation = validateRequest(healthUpdateSchema, sanitizeObject(body))
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
+    }
+
     const update = await HealthUpdate.create({
-      ...body,
-      author: user.email
+      ...validation.data,
+      publishedBy: user.email,
     })
 
-    return NextResponse.json({ success: true, update }, { status: 201 })
+    await logAudit({
+      userId: user.userId,
+      action: 'create',
+      resource: 'health-updates',
+      resourceId: (update as any)._id.toString(),
+      details: { method: 'POST', endpoint: '/api/health-updates', title: update.title },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+      complianceCategory: 'data_modification',
+      severity: update.severity === 'critical' ? 'critical' : 'warning',
+    })
 
+    return NextResponse.json({ success: true, update: serializeHealthUpdate(update.toObject()) }, { status: 201 })
   } catch (error: any) {
     console.error('Create health update error:', error)
     return NextResponse.json(
@@ -74,31 +130,49 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH - Update health update (admin only)
 export async function PATCH(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user || user.role !== 'admin') {
+    const user = getAuthenticatedUser(request)
+    if (!isAdmin(user)) {
       return NextResponse.json({ error: 'Unauthorized - Admin only' }, { status: 403 })
     }
 
     await connectDB()
-    
-    const body = await request.json()
-    const { id, ...updates } = body
 
+    const body = await request.json()
+    const validation = validateRequest(healthUpdateUpdateSchema, sanitizeObject(body))
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
+    }
+
+    const { id, ...updates } = validation.data
     const update = await HealthUpdate.findByIdAndUpdate(
       id,
-      updates,
-      { new: true }
+      { $set: updates },
+      { new: true, runValidators: true }
     )
 
     if (!update) {
       return NextResponse.json({ error: 'Health update not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, update })
+    await logAudit({
+      userId: user.userId,
+      action: 'update',
+      resource: 'health-updates',
+      resourceId: id,
+      details: { method: 'PATCH', endpoint: '/api/health-updates', changes: updates },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+      complianceCategory: 'data_modification',
+      severity: update.severity === 'critical' ? 'critical' : 'warning',
+    })
 
+    return NextResponse.json({ success: true, update: serializeHealthUpdate(update.toObject()) })
   } catch (error: any) {
     console.error('Update health update error:', error)
     return NextResponse.json(
@@ -108,31 +182,42 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE - Delete health update (admin only)
 export async function DELETE(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user || user.role !== 'admin') {
+    const user = getAuthenticatedUser(request)
+    if (!isAdmin(user)) {
       return NextResponse.json({ error: 'Unauthorized - Admin only' }, { status: 403 })
     }
 
     await connectDB()
-    
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
+    const idValidation = validateRequest(mongoIdSchema, id)
 
-    if (!id) {
+    if (!idValidation.success) {
       return NextResponse.json({ error: 'Health update ID required' }, { status: 400 })
     }
 
-    const update = await HealthUpdate.findByIdAndDelete(id)
+    const update = await HealthUpdate.findByIdAndDelete(idValidation.data)
 
     if (!update) {
       return NextResponse.json({ error: 'Health update not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, message: 'Health update deleted' })
+    await logAudit({
+      userId: user.userId,
+      action: 'delete',
+      resource: 'health-updates',
+      resourceId: idValidation.data,
+      details: { method: 'DELETE', endpoint: '/api/health-updates', title: update.title },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+      complianceCategory: 'data_modification',
+      severity: 'critical',
+    })
 
+    return NextResponse.json({ success: true, message: 'Health update deleted' })
   } catch (error: any) {
     console.error('Delete health update error:', error)
     return NextResponse.json(

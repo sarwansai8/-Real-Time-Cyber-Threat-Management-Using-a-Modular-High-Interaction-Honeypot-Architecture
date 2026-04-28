@@ -4,9 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refresh-secret-key-change-this'
+import { getJwtRefreshSecret, getJwtSecret } from './env'
 
 // In-memory store for CSRF tokens (use Redis in production)
 const csrfTokens = new Map<string, { token: string; expires: number }>()
@@ -88,7 +86,7 @@ export function shouldRotateToken(token: string): boolean {
  */
 export function rotateJWTToken(oldToken: string): string | null {
   try {
-    const decoded = jwt.verify(oldToken, JWT_SECRET) as any
+    const decoded = jwt.verify(oldToken, getJwtSecret()) as any
     
     // Generate new token with extended expiry
     const newToken = jwt.sign(
@@ -97,7 +95,7 @@ export function rotateJWTToken(oldToken: string): string | null {
         email: decoded.email,
         role: decoded.role,
       },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '7d' }
     )
     
@@ -113,14 +111,14 @@ export function rotateJWTToken(oldToken: string): string | null {
 export function generateRefreshToken(userId: string): string {
   return jwt.sign(
     { userId, type: 'refresh' },
-    JWT_REFRESH_SECRET,
+    getJwtRefreshSecret(),
     { expiresIn: '30d' }
   )
 }
 
 export function verifyRefreshToken(refreshToken: string): { userId: string } | null {
   try {
-    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as any
+    const decoded = jwt.verify(refreshToken, getJwtRefreshSecret()) as any
     if (decoded.type !== 'refresh') return null
     return { userId: decoded.userId }
   } catch {

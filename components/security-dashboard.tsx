@@ -55,11 +55,11 @@ export function SecurityDashboard() {
         const parsed = JSON.parse(storedEvents)
         const recentEvents = parsed.slice(-50).map((e: any) => ({
           id: e.timestamp + Math.random(),
-          type: e.eventType,
+          type: e.type || e.eventType,
           severity: e.severity,
           timestamp: new Date(e.timestamp),
-          details: e.description,
-          ipAddress: e.data?.ipAddress || 'unknown',
+          details: e.details || e.description,
+          ipAddress: e.ipAddress || e.data?.ipAddress || 'unknown',
           blocked: e.severity === 'critical'
         }))
         setEvents(recentEvents)

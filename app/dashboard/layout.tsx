@@ -10,20 +10,20 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { isLoggedIn } = useAuth()
+  const { isLoggedIn, isLoading } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
-    if (!isLoggedIn) {
+    if (!isLoading && !isLoggedIn) {
       router.push('/auth/login')
     }
-  }, [isLoggedIn, router])
+  }, [isLoading, isLoggedIn, router])
 
-  if (!isLoggedIn) {
+  if (isLoading || !isLoggedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <p className="text-muted-foreground">Redirecting to login...</p>
+          <p className="text-muted-foreground">{isLoading ? 'Loading your session...' : 'Redirecting to login...'}</p>
         </div>
       </div>
     )

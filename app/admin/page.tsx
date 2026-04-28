@@ -35,7 +35,7 @@ export default function AdminDashboardPage() {
     securityEvents: 0
   })
   const [loading, setLoading] = useState(true)
-  const [chartData, setChartData] = useState<any[]>([])
+  const [chartData, setChartData] = useState<Array<{ day: string; users: number; views: number }>>([])
 
   useEffect(() => {
     fetchAnalytics()
@@ -43,29 +43,23 @@ export default function AdminDashboardPage() {
 
   const fetchAnalytics = async () => {
     try {
-      const response = await fetch('/api/admin/analytics')
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data.stats)
-        setChartData(data.chartData || [])
-      } else {
-        // Fallback to localStorage
-        const updates = JSON.parse(localStorage.getItem('portalHealthUpdates') || '[]')
-        const users = JSON.parse(localStorage.getItem('medicalPortalUsers') || '[]')
-        
-        const totalViews = updates.reduce((sum: number, u: any) => sum + u.views, 0)
-        const criticalAlerts = updates.filter((u: any) => u.severity === 'critical').length
+      const response = await fetch('/api/admin/analytics', { cache: 'no-store' })
+      const data = await response.json()
 
-        setStats({
-          totalUsers: users.length,
-          totalUpdates: updates.length,
-          totalViews,
-          criticalAlerts,
-          totalAppointments: 0,
-          totalRecords: 0,
-          securityEvents: 0
-        })
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch analytics')
       }
+
+      setStats({
+        totalUsers: data.stats?.totalUsers || 0,
+        totalUpdates: data.stats?.totalUpdates || 0,
+        totalViews: data.stats?.totalViews || 0,
+        criticalAlerts: data.stats?.criticalAlerts || 0,
+        totalAppointments: data.stats?.totalAppointments || 0,
+        totalRecords: data.stats?.totalRecords || 0,
+        securityEvents: data.stats?.securityEvents || 0
+      })
+      setChartData(data.chartData || [])
     } catch (error) {
       console.error('Failed to fetch analytics:', error)
     } finally {

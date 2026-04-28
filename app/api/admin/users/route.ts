@@ -1,67 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
 import connectDB from '@/lib/db'
 import { User } from '@/lib/models'
 import { logAudit } from '@/lib/audit-logger'
+import { adminUserUpdateSchema, mongoIdSchema, sanitizeObject, validateRequest } from '@/lib/validations'
+import { getAuthenticatedUser, getClientIp, getUserAgent, isAdmin } from '@/lib/auth'
+import { escapeRegex } from '@/lib/utils'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-
-function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value || 
-                 request.headers.get('authorization')?.replace('Bearer ', '')
-  
-  if (!token) return null
-  
-  try {
-    return jwt.verify(token, JWT_SECRET) as any
-  } catch {
-    return null
-  }
-}
-
-// GET - Fetch all users (Admin only)
 export async function GET(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    if (user.role !== 'admin') {
+    const user = getAuthenticatedUser(request)
+    if (!isAdmin(user)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
     await connectDB()
-    
+
     const { searchParams } = new URL(request.url)
-    const role = searchParams.get('role')
+    const role = searchParams.get('role')?.trim() || ''
     const verified = searchParams.get('verified')
-    const search = searchParams.get('search')
-    
-    // Build query
-    const query: any = {}
-    
-    if (role) query.role = role
-    if (verified !== null) query.verified = verified === 'true'
-    
+    const search = searchParams.get('search')?.trim() || ''
+
+    const query: Record<string, unknown> = {}
+
+    if (role && ['patient', 'admin', 'doctor'].includes(role)) {
+      query.role = role
+    }
+
+    if (verified === 'true' || verified === 'false') {
+      query.verified = verified === 'true'
+    }
+
     if (search) {
+      const pattern = escapeRegex(search)
       query.$or = [
-        { email: { $regex: search, $options: 'i' } },
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
+        { email: { $regex: pattern, $options: 'i' } },
+        { firstName: { $regex: pattern, $options: 'i' } },
+        { lastName: { $regex: pattern, $options: 'i' } },
+        { phone: { $regex: pattern, $options: 'i' } },
       ]
     }
-    
+
     const users = await User.find(query)
       .select('-password -__v')
       .sort({ createdAt: -1 })
       .lean()
 
-    // Log audit
-    const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    const userAgent = request.headers.get('user-agent') || 'unknown'
-    
     await logAudit({
       userId: user.userId,
       action: 'read',
@@ -70,20 +53,19 @@ export async function GET(request: NextRequest) {
         method: 'GET',
         endpoint: '/api/admin/users',
         query: { role, verified, search },
-        count: users.length
+        count: users.length,
       },
-      ipAddress,
-      userAgent,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
       complianceCategory: 'phi_access',
       severity: 'info',
     })
 
-    return NextResponse.json({ 
-      success: true, 
-      users,
-      count: users.length
+    return NextResponse.json({
+      success: true,
+      users: users.map((item: any) => ({ ...item, _id: String(item._id) })),
+      count: users.length,
     })
-
   } catch (error: any) {
     console.error('Fetch users error:', error)
     return NextResponse.json(
@@ -93,44 +75,44 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PATCH - Update user (Admin only)
 export async function PATCH(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    if (user.role !== 'admin') {
+    const user = getAuthenticatedUser(request)
+    if (!isAdmin(user)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
     await connectDB()
-    
-    const body = await request.json()
-    const { userId, ...updates } = body
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId required' }, { status: 400 })
+    const body = await request.json()
+    const validation = validateRequest(adminUserUpdateSchema, sanitizeObject(body))
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
     }
 
-    // Prevent password updates through this endpoint
-    delete updates.password
+    const { userId, ...updates } = validation.data
+
+    if (userId === user.userId && updates.role && updates.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'You cannot remove your own admin role' },
+        { status: 400 }
+      )
+    }
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updates },
-      { new: true, select: '-password -__v' }
-    )
+      { new: true, runValidators: true }
+    ).select('-password -__v')
 
     if (!updatedUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Log audit
-    const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    const userAgent = request.headers.get('user-agent') || 'unknown'
-    
     await logAudit({
       userId: user.userId,
       action: 'update',
@@ -139,16 +121,15 @@ export async function PATCH(request: NextRequest) {
       details: {
         method: 'PATCH',
         endpoint: '/api/admin/users',
-        changes: updates
+        changes: updates,
       },
-      ipAddress,
-      userAgent,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
       complianceCategory: 'data_modification',
       severity: 'warning',
     })
 
-    return NextResponse.json({ success: true, user: updatedUser })
-
+    return NextResponse.json({ success: true, user: { ...updatedUser.toObject(), _id: userId } })
   } catch (error: any) {
     console.error('Update user error:', error)
     return NextResponse.json(
@@ -158,63 +139,53 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE - Delete user (Admin only)
 export async function DELETE(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    if (user.role !== 'admin') {
+    const user = getAuthenticatedUser(request)
+    if (!isAdmin(user)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
     await connectDB()
-    
+
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
+    const userIdValidation = validateRequest(mongoIdSchema, userId)
 
-    if (!userId) {
+    if (!userIdValidation.success) {
       return NextResponse.json({ error: 'userId required' }, { status: 400 })
     }
 
-    // Prevent self-deletion
-    if (userId === user.userId) {
+    if (userIdValidation.data === user.userId) {
       return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 })
     }
 
-    const deletedUser = await User.findByIdAndDelete(userId)
+    const deletedUser = await User.findByIdAndDelete(userIdValidation.data)
 
     if (!deletedUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Log audit
-    const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    const userAgent = request.headers.get('user-agent') || 'unknown'
-    
     await logAudit({
       userId: user.userId,
       action: 'delete',
       resource: 'users',
-      resourceId: userId,
+      resourceId: userIdValidation.data,
       details: {
         method: 'DELETE',
         endpoint: '/api/admin/users',
-        deletedEmail: deletedUser.email
+        deletedEmail: deletedUser.email,
       },
-      ipAddress,
-      userAgent,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
       complianceCategory: 'data_modification',
       severity: 'critical',
     })
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'User deleted successfully' 
+    return NextResponse.json({
+      success: true,
+      message: 'User deleted successfully',
     })
-
   } catch (error: any) {
     console.error('Delete user error:', error)
     return NextResponse.json(

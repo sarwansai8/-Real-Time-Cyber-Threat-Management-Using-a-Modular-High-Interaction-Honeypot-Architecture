@@ -3,7 +3,7 @@
 export interface SecurityEvent {
   id: string
   timestamp: string
-  type: 'login_attempt' | 'honeypot_triggered' | 'suspicious_behavior' | 'bot_detected' | 'failed_auth'
+  type: 'login_attempt' | 'honeypot_triggered' | 'suspicious_behavior' | 'bot_detected' | 'failed_auth' | 'injection_attempt'
   severity: 'low' | 'medium' | 'high' | 'critical'
   ipAddress: string
   location: {

@@ -28,6 +28,9 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required')
 })
 
+// ID Validation
+export const mongoIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID format')
+
 // Appointment Schema
 export const appointmentSchema = z.object({
   doctorName: z.string().min(2, 'Doctor name is required').max(100),
@@ -37,6 +40,10 @@ export const appointmentSchema = z.object({
   location: z.string().max(200).optional(),
   phone: z.string().max(20).optional(),
   notes: z.string().max(500).optional()
+})
+
+export const appointmentUpdateSchema = appointmentSchema.partial().extend({
+  id: mongoIdSchema
 })
 
 // Medical Record Schema
@@ -51,6 +58,10 @@ export const medicalRecordSchema = z.object({
   confidential: z.boolean().optional().default(false)
 })
 
+export const medicalRecordUpdateSchema = medicalRecordSchema.partial().extend({
+  id: mongoIdSchema
+})
+
 // Vaccination Schema
 export const vaccinationSchema = z.object({
   vaccineName: z.string().min(2, 'Vaccine name is required').max(100),
@@ -61,15 +72,47 @@ export const vaccinationSchema = z.object({
   notes: z.string().max(500).optional()
 })
 
+export const vaccinationUpdateSchema = vaccinationSchema.partial().extend({
+  id: mongoIdSchema
+})
+
 // Health Update Schema
 export const healthUpdateSchema = z.object({
   title: z.string().min(5, 'Title is required').max(200),
   content: z.string().min(20, 'Content is required'),
   summary: z.string().min(10, 'Summary is required').max(500),
-  category: z.string().min(2, 'Category is required'),
-  severity: z.enum(['info', 'warning', 'alert', 'critical']),
-  publishedBy: z.string().min(2, 'Publisher name is required'),
-  publishedDate: z.string().optional()
+  category: z.enum(['advisory', 'prevention', 'research', 'outbreak', 'vaccination']),
+  severity: z.enum(['low', 'medium', 'high', 'critical']),
+  publishedDate: z.string().optional(),
+  status: z.enum(['draft', 'published', 'archived']).optional().default('published'),
+  region: z.enum(['National', 'Regional', 'International']).optional().default('National')
+})
+
+export const healthUpdateUpdateSchema = healthUpdateSchema.partial().extend({
+  id: mongoIdSchema
+})
+
+export const profileUpdateSchema = registerSchema.pick({
+  firstName: true,
+  lastName: true,
+  phone: true,
+  address: true,
+  city: true,
+  state: true,
+  zipCode: true,
+  bloodType: true,
+  emergencyContact: true,
+}).partial()
+
+export const adminUserUpdateSchema = z.object({
+  userId: mongoIdSchema,
+  role: z.enum(['patient', 'admin', 'doctor']).optional(),
+  verified: z.boolean().optional(),
+  firstName: z.string().min(1).max(50).optional(),
+  lastName: z.string().min(1).max(50).optional(),
+  phone: z.string().regex(/^[\d\s\-\+\(\)]+$/, 'Invalid phone number').optional(),
+  city: z.string().min(2).max(100).optional(),
+  state: z.string().min(2).max(100).optional(),
 })
 
 // Pagination Schema
@@ -86,9 +129,6 @@ export const searchSchema = z.object({
   fields: z.array(z.string()).optional(),
   filters: z.record(z.any()).optional()
 })
-
-// ID Validation
-export const mongoIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID format')
 
 // Export validation helper function
 export function validateRequest<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; errors: string[] } {

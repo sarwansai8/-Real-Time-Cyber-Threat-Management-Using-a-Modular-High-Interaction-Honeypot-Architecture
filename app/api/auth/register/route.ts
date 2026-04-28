@@ -4,6 +4,7 @@ import connectDB from '@/lib/db'
 import { User } from '@/lib/models'
 import { registerSchema, validateRequest, sanitizeObject } from '@/lib/validations'
 import { authRateLimit, getClientIdentifier } from '@/lib/rate-limit'
+import { toPublicUser } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,22 +69,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'Registration successful',
-      user: {
-        id: userResponse._id,
-        email: userResponse.email,
-        firstName: userResponse.firstName,
-        lastName: userResponse.lastName,
-        dateOfBirth: userResponse.dateOfBirth,
-        gender: userResponse.gender,
-        phone: userResponse.phone,
-        address: userResponse.address,
-        city: userResponse.city,
-        state: userResponse.state,
-        zipCode: userResponse.zipCode,
-        bloodType: userResponse.bloodType,
-        emergencyContact: userResponse.emergencyContact,
-        registeredDate: userResponse.createdAt
-      }
+      user: toPublicUser(userResponse)
     }, { 
       status: 201,
       headers: {

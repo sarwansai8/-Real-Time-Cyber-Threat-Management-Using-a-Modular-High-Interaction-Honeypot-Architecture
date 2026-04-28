@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { 
   Users, Search, UserCheck, UserX, Shield, Clock, 
   Mail, Phone, Calendar, MapPin, Download 
@@ -27,6 +28,7 @@ interface User {
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([])
   const [filteredUsers, setFilteredUsers] = useState<User[]>([])
+  const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'admin' | 'patient' | 'verified'>('all')
@@ -115,6 +117,7 @@ export default function AdminUsersPage() {
     a.href = url
     a.download = `users_${new Date().toISOString().split('T')[0]}.csv`
     a.click()
+    URL.revokeObjectURL(url)
   }
 
   if (loading) {
@@ -287,7 +290,7 @@ export default function AdminUsersPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => setSelectedUser(user)}>
                       View Details
                     </Button>
                   </div>
@@ -297,6 +300,68 @@ export default function AdminUsersPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!selectedUser} onOpenChange={(open) => !open && setSelectedUser(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>User Details</DialogTitle>
+            <DialogDescription>
+              Review account information for the selected portal user.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedUser && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Full Name</p>
+                  <p className="font-medium">{selectedUser.firstName} {selectedUser.lastName}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Role</p>
+                  <p className="font-medium capitalize">{selectedUser.role}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Email</p>
+                  <p className="font-medium break-all">{selectedUser.email}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Phone</p>
+                  <p className="font-medium">{selectedUser.phone || 'Not provided'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Location</p>
+                  <p className="font-medium">{selectedUser.city}, {selectedUser.state}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Verified</p>
+                  <p className="font-medium">{selectedUser.verified ? 'Yes' : 'No'}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground">Joined</p>
+                <p className="font-medium">{new Date(selectedUser.createdAt).toLocaleString()}</p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedUser.email)
+                    setSelectedUser(null)
+                  }}
+                >
+                  Copy Email
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={() => setSelectedUser(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

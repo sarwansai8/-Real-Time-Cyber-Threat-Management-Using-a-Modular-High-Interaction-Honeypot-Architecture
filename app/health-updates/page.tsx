@@ -1,146 +1,94 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { AlertCircle, Search, Filter, Bookmark, Share2, TrendingUp, Info, Clock, Eye } from 'lucide-react'
+import { AlertCircle, Search, Filter, Bookmark, Share2, TrendingUp, Clock, Eye } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import Link from 'next/link'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { EmptyState } from '@/components/ui/empty-state'
-
-interface HealthUpdate {
-  id: string
-  title: string
-  summary: string
-  content: string
-  category: 'advisory' | 'prevention' | 'research' | 'outbreak' | 'vaccination'
-  severity: 'critical' | 'high' | 'medium' | 'low'
-  publishedDate: string
-  views: number
-  savedCount: number
-  region: string
-}
+import type { HealthUpdateSummary } from '@/lib/types'
 
 export default function HealthUpdatesPage() {
-  const [updates, setUpdates] = useState<HealthUpdate[]>([])
+  const [updates, setUpdates] = useState<HealthUpdateSummary[]>([])
+  const [selectedUpdate, setSelectedUpdate] = useState<HealthUpdateSummary | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState<string>('all')
   const [filterSeverity, setFilterSeverity] = useState<string>('all')
   const [savedUpdates, setSavedUpdates] = useState<string[]>([])
 
   useEffect(() => {
-    // Load saved updates from localStorage
     const saved = localStorage.getItem('savedHealthUpdates')
     if (saved) {
       setSavedUpdates(JSON.parse(saved))
     }
 
-    // Load or create health updates
-    const stored = localStorage.getItem('portalHealthUpdates')
-    if (stored) {
-      setUpdates(JSON.parse(stored))
-    } else {
-      const samples: HealthUpdate[] = [
-        {
-          id: 'update_1',
-          title: 'Flu Season 2025: Prevention and Vaccination Guide',
-          summary: 'As flu season approaches, health officials recommend vaccination for all individuals over 6 months old.',
-          content: 'The 2025 flu season is expected to be moderate. The CDC recommends annual influenza vaccination for everyone 6 months and older. Vaccination can reduce flu illness, hospitalization, and death.',
-          category: 'prevention',
-          severity: 'high',
-          publishedDate: '2025-11-15',
-          views: 5230,
-          savedCount: 342,
-          region: 'National'
-        },
-        {
-          id: 'update_2',
-          title: 'Important: Blood Pressure Screening Available',
-          summary: 'Free community health screening event scheduled for next week at all regional health centers.',
-          content: 'The National Health Portal is offering free blood pressure and basic health screenings. These screenings are important for early detection of hypertension and cardiovascular diseases.',
-          category: 'advisory',
-          severity: 'medium',
-          publishedDate: '2025-11-14',
-          views: 3120,
-          savedCount: 215,
-          region: 'Regional'
-        },
-        {
-          id: 'update_3',
-          title: 'New COVID-19 Variant Detected: What You Should Know',
-          summary: 'Health authorities confirm detection of new COVID-19 variant. Updated vaccination strategy in place.',
-          content: 'A new COVID-19 variant has been detected. Preliminary data suggests currently available vaccines remain effective. Boosters are recommended for eligible populations.',
-          category: 'outbreak',
-          severity: 'high',
-          publishedDate: '2025-11-13',
-          views: 8945,
-          savedCount: 567,
-          region: 'National'
-        },
-        {
-          id: 'update_4',
-          title: 'Research: Mediterranean Diet Benefits for Heart Health',
-          summary: 'New study confirms Mediterranean diet reduces cardiovascular disease risk by 30%.',
-          content: 'Recent research published in the Journal of Medical Sciences demonstrates that adherence to a Mediterranean diet pattern is associated with a 30% reduction in cardiovascular disease risk over 10 years.',
-          category: 'research',
-          severity: 'low',
-          publishedDate: '2025-11-12',
-          views: 4560,
-          savedCount: 289,
-          region: 'International'
-        },
-        {
-          id: 'update_5',
-          title: 'RSV Vaccine Now Available for Eligible Adults',
-          summary: 'CDC approves new RSV vaccine for adults 60 and older. Protect yourself and your loved ones.',
-          content: 'The CDC has approved a new respiratory syncytial virus (RSV) vaccine for adults aged 60 and older. This vaccine offers protection against RSV, which can cause severe respiratory illness in older adults.',
-          category: 'vaccination',
-          severity: 'medium',
-          publishedDate: '2025-11-11',
-          views: 2340,
-          savedCount: 178,
-          region: 'National'
-        },
-        {
-          id: 'update_6',
-          title: 'Heat-Related Illness Prevention Tips',
-          summary: 'As temperatures rise, learn how to protect yourself from heat exhaustion and heat stroke.',
-          content: 'During periods of extreme heat, it is important to stay hydrated, avoid prolonged sun exposure, and check on elderly neighbors and friends. Signs of heat exhaustion include heavy sweating, weakness, and dizziness.',
-          category: 'prevention',
-          severity: 'medium',
-          publishedDate: '2025-11-10',
-          views: 1890,
-          savedCount: 112,
-          region: 'Regional'
-        }
-      ]
-      setUpdates(samples)
-      localStorage.setItem('portalHealthUpdates', JSON.stringify(samples))
-    }
+    void fetchUpdates()
   }, [])
+
+  const fetchUpdates = async () => {
+    try {
+      const response = await fetch('/api/health-updates', { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error('Failed to fetch health updates')
+      }
+
+      const data = await response.json()
+      setUpdates(data.updates || [])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch health updates'
+      toast.error(message)
+    }
+  }
+
+  const openUpdate = (id: string) => {
+    setUpdates((currentUpdates) =>
+      currentUpdates.map((update) =>
+        update.id === id ? { ...update, views: update.views + 1 } : update
+      )
+    )
+
+    setSelectedUpdate((current) => {
+      if (current?.id === id) {
+        return { ...current, views: current.views + 1 }
+      }
+
+      const update = updates.find((item) => item.id === id)
+      return update ? { ...update, views: update.views + 1 } : null
+    })
+  }
 
   const toggleSaveUpdate = (id: string) => {
     const isSaved = savedUpdates.includes(id)
-    const updated = isSaved
-      ? savedUpdates.filter(uid => uid !== id)
+    const updatedSaved = isSaved
+      ? savedUpdates.filter((updateId) => updateId !== id)
       : [...savedUpdates, id]
-    
-    setSavedUpdates(updated)
-    localStorage.setItem('savedHealthUpdates', JSON.stringify(updated))
 
-    // Update view count
-    const updatedUpdates = updates.map(u =>
-      u.id === id && !savedUpdates.includes(id)
-        ? { ...u, savedCount: u.savedCount + 1 }
-        : u
+    setSavedUpdates(updatedSaved)
+    localStorage.setItem('savedHealthUpdates', JSON.stringify(updatedSaved))
+
+    setUpdates((currentUpdates) =>
+      currentUpdates.map((update) =>
+        update.id === id
+          ? {
+              ...update,
+              savedCount: update.savedCount + (isSaved ? -1 : 1),
+            }
+          : update
+      )
     )
-    setUpdates(updatedUpdates)
-    
-    // Show toast notification
+
+    if (selectedUpdate?.id === id) {
+      setSelectedUpdate({
+        ...selectedUpdate,
+        savedCount: selectedUpdate.savedCount + (isSaved ? -1 : 1),
+      })
+    }
+
     if (isSaved) {
       toast.info('Update removed from saved items')
     } else {
@@ -148,57 +96,70 @@ export default function HealthUpdatesPage() {
     }
   }
 
-  const filteredUpdates = updates.filter(update => {
-    const matchesSearch = update.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const shareUpdate = async (update: HealthUpdateSummary) => {
+    const shareUrl = `${window.location.origin}/health-updates#${update.id}`
+    const shareData = {
+      title: update.title,
+      text: update.summary,
+      url: shareUrl,
+    }
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData)
+      } else {
+        await navigator.clipboard.writeText(`${update.title}\n${update.summary}\n${shareUrl}`)
+        toast.success('Link copied', { description: 'The update details were copied to your clipboard.' })
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+      toast.error('Unable to share update right now')
+    }
+  }
+
+  const filteredUpdates = updates.filter((update) => {
+    const matchesSearch =
+      update.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       update.summary.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesCategory = filterCategory === 'all' || update.category === filterCategory
     const matchesSeverity = filterSeverity === 'all' || update.severity === filterSeverity
     return matchesSearch && matchesCategory && matchesSeverity
   })
 
-  const getSeverityBadge = (severity: string) => {
-    const variants: Record<string, string> = {
+  const getSeverityBadge = (severity: HealthUpdateSummary['severity']) => {
+    const variants: Record<HealthUpdateSummary['severity'], string> = {
       critical: 'bg-destructive text-destructive-foreground',
       high: 'bg-accent text-accent-foreground',
       medium: 'bg-primary text-primary-foreground',
-      low: 'bg-secondary text-secondary-foreground'
+      low: 'bg-secondary text-secondary-foreground',
     }
-    return variants[severity] || variants.low
+
+    return variants[severity]
   }
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
+  const getCategoryColor = (category: HealthUpdateSummary['category']) => {
+    const colors: Record<HealthUpdateSummary['category'], string> = {
       advisory: 'bg-blue-500/10 text-blue-600',
       prevention: 'bg-green-500/10 text-green-600',
-      research: 'bg-purple-500/10 text-purple-600',
+      research: 'bg-amber-500/10 text-amber-600',
       outbreak: 'bg-red-500/10 text-red-600',
-      vaccination: 'bg-cyan-500/10 text-cyan-600'
+      vaccination: 'bg-cyan-500/10 text-cyan-600',
     }
-    return colors[category] || colors.advisory
-  }
 
-  const getCategoryLabel = (category: string) => {
-    const labels: Record<string, string> = {
-      advisory: 'Advisory',
-      prevention: 'Prevention',
-      research: 'Research',
-      outbreak: 'Outbreak',
-      vaccination: 'Vaccination'
-    }
-    return labels[category] || 'Other'
+    return colors[category]
   }
 
   return (
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: 'Health Updates' }]} />
-      
-      {/* Header */}
+
       <div>
         <h1 className="text-3xl font-bold text-foreground">Health Updates & Advisories</h1>
         <p className="text-muted-foreground mt-1">Official health information and guidance from government health agencies</p>
       </div>
 
-      {/* Search and Filters */}
       <div className="space-y-4">
         <div className="relative">
           <Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
@@ -241,8 +202,7 @@ export default function HealthUpdatesPage() {
         </div>
       </div>
 
-      {/* Featured Critical Alerts */}
-      {updates.some(u => u.severity === 'critical') && (
+      {updates.some((update) => update.severity === 'critical') && (
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
@@ -258,7 +218,6 @@ export default function HealthUpdatesPage() {
         </Card>
       )}
 
-      {/* Updates List */}
       {filteredUpdates.length === 0 ? (
         <EmptyState
           icon={Search}
@@ -276,11 +235,14 @@ export default function HealthUpdatesPage() {
         />
       ) : (
         <div className="space-y-4">
-          {filteredUpdates.map(update => (
-            <Card key={update.id} className="border-border/50 hover:shadow-md transition-shadow cursor-pointer overflow-hidden">
+          {filteredUpdates.map((update) => (
+            <Card
+              key={update.id}
+              className="border-border/50 hover:shadow-md transition-shadow cursor-pointer overflow-hidden"
+              onClick={() => openUpdate(update.id)}
+            >
               <CardContent className="pt-6">
                 <div className="space-y-4">
-                  {/* Header */}
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -290,15 +252,13 @@ export default function HealthUpdatesPage() {
                         </Badge>
                       </div>
                       <Badge className={`${getCategoryColor(update.category)} mt-2`} variant="outline">
-                        {getCategoryLabel(update.category)}
+                        {update.category.charAt(0).toUpperCase() + update.category.slice(1)}
                       </Badge>
                     </div>
                   </div>
 
-                  {/* Summary */}
                   <p className="text-sm text-muted-foreground line-clamp-2">{update.summary}</p>
 
-                  {/* Metadata */}
                   <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                     <div className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
@@ -314,21 +274,38 @@ export default function HealthUpdatesPage() {
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="flex items-center justify-between pt-2 border-t border-border">
-                    <Button asChild variant="ghost" size="sm" className="text-primary hover:text-primary">
-                      <Link href="#">Read Full Article</Link>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-primary hover:text-primary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openUpdate(update.id)
+                      }}
+                    >
+                      Read Full Article
                     </Button>
                     <div className="flex gap-2">
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => toggleSaveUpdate(update.id)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          toggleSaveUpdate(update.id)
+                        }}
                         className={savedUpdates.includes(update.id) ? 'text-accent' : ''}
                       >
                         <Bookmark className={`w-4 h-4 ${savedUpdates.includes(update.id) ? 'fill-accent' : ''}`} />
                       </Button>
-                      <Button variant="ghost" size="icon">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void shareUpdate(update)
+                        }}
+                      >
                         <Share2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -340,7 +317,6 @@ export default function HealthUpdatesPage() {
         </div>
       )}
 
-      {/* Saved Updates Summary */}
       {savedUpdates.length > 0 && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="pt-6">
@@ -350,6 +326,47 @@ export default function HealthUpdatesPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={!!selectedUpdate} onOpenChange={(open) => !open && setSelectedUpdate(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedUpdate?.title}</DialogTitle>
+            <DialogDescription>{selectedUpdate?.region} health advisory</DialogDescription>
+          </DialogHeader>
+
+          {selectedUpdate && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge className={getSeverityBadge(selectedUpdate.severity)}>
+                  {selectedUpdate.severity.charAt(0).toUpperCase() + selectedUpdate.severity.slice(1)}
+                </Badge>
+                <Badge className={getCategoryColor(selectedUpdate.category)} variant="outline">
+                  {selectedUpdate.category.charAt(0).toUpperCase() + selectedUpdate.category.slice(1)}
+                </Badge>
+              </div>
+
+              <p className="text-sm text-muted-foreground">{selectedUpdate.summary}</p>
+              <div className="text-sm leading-relaxed whitespace-pre-line">{selectedUpdate.content}</div>
+
+              <div className="flex flex-wrap gap-4 text-xs text-muted-foreground pt-2 border-t border-border">
+                <span>{new Date(selectedUpdate.publishedDate).toLocaleDateString()}</span>
+                <span>{selectedUpdate.views.toLocaleString()} views</span>
+                <span>{selectedUpdate.savedCount.toLocaleString()} saves</span>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button className="flex-1" onClick={() => void shareUpdate(selectedUpdate)}>
+                  <Share2 className="w-4 h-4 mr-2" />
+                  Share
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={() => setSelectedUpdate(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

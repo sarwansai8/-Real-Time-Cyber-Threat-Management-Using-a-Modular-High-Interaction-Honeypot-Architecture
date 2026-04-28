@@ -69,11 +69,14 @@ export interface IHealthUpdate extends Document {
   title: string
   content: string
   summary: string
-  category: string
-  severity: 'info' | 'warning' | 'alert' | 'critical'
+  category: 'advisory' | 'prevention' | 'research' | 'outbreak' | 'vaccination'
+  severity: 'low' | 'medium' | 'high' | 'critical'
   publishedBy: string
   publishedDate: Date
+  status: 'draft' | 'published' | 'archived'
+  region: 'National' | 'Regional' | 'International'
   views: number
+  savedCount: number
   createdAt: Date
   updatedAt: Date
 }
@@ -98,7 +101,7 @@ export interface IAuditLog extends Document {
 // Security Event Interface
 export interface ISecurityEvent extends Document {
   timestamp: Date
-  type: 'login_attempt' | 'honeypot_triggered' | 'suspicious_behavior' | 'bot_detected' | 'failed_auth'
+  type: 'login_attempt' | 'honeypot_triggered' | 'suspicious_behavior' | 'bot_detected' | 'failed_auth' | 'injection_attempt'
   severity: 'low' | 'medium' | 'high' | 'critical'
   ipAddress: string
   location: {
@@ -196,18 +199,37 @@ const HealthUpdateSchema = new Schema<IHealthUpdate>({
   title: { type: String, required: true },
   content: { type: String, required: true },
   summary: { type: String, required: true },
-  category: { type: String, required: true },
-  severity: { type: String, enum: ['info', 'warning', 'alert', 'critical'], default: 'info' },
+  category: {
+    type: String,
+    enum: ['advisory', 'prevention', 'research', 'outbreak', 'vaccination'],
+    required: true,
+  },
+  severity: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'critical'],
+    default: 'medium',
+  },
   publishedBy: { type: String, required: true },
   publishedDate: { type: Date, default: Date.now },
+  status: {
+    type: String,
+    enum: ['draft', 'published', 'archived'],
+    default: 'published',
+  },
+  region: {
+    type: String,
+    enum: ['National', 'Regional', 'International'],
+    default: 'National',
+  },
   views: { type: Number, default: 0 },
+  savedCount: { type: Number, default: 0 },
 }, { timestamps: true })
 
 const SecurityEventSchema = new Schema<ISecurityEvent>({
   timestamp: { type: Date, default: Date.now },
   type: { 
     type: String, 
-    enum: ['login_attempt', 'honeypot_triggered', 'suspicious_behavior', 'bot_detected', 'failed_auth'],
+    enum: ['login_attempt', 'honeypot_triggered', 'suspicious_behavior', 'bot_detected', 'failed_auth', 'injection_attempt'],
     required: true 
   },
   severity: { type: String, enum: ['low', 'medium', 'high', 'critical'], required: true },
@@ -254,6 +276,8 @@ const SecurityEventSchema = new Schema<ISecurityEvent>({
 AppointmentSchema.index({ userId: 1, date: 1 })
 MedicalRecordSchema.index({ userId: 1, date: -1 })
 VaccinationSchema.index({ userId: 1, date: -1 })
+HealthUpdateSchema.index({ status: 1, publishedDate: -1 })
+HealthUpdateSchema.index({ category: 1, severity: 1 })
 SecurityEventSchema.index({ timestamp: -1, severity: 1 })
 
 // Export models

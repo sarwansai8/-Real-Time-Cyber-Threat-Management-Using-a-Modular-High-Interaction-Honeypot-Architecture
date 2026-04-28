@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
 import connectDB from '@/lib/db'
 import { User } from '@/lib/models'
 import { loginSchema, validateRequest } from '@/lib/validations'
@@ -15,16 +14,40 @@ import {
 } from '@/lib/advanced-security'
 import { createSession } from '@/lib/session-manager'
 import { logAudit } from '@/lib/audit-logger'
+import { createSecurityEvent } from '@/lib/security-events'
+import { createAuthToken, getClientIp, getUserAgent, toPublicUser } from '@/lib/auth'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
+async function logSecurityEventSafely(request: NextRequest, payload: Parameters<typeof createSecurityEvent>[0]) {
+  try {
+    await createSecurityEvent(payload, { request })
+  } catch (error) {
+    console.error('Security event logging failed during login flow:', error)
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
+    const clientIP = getClientIp(request)
+    const userAgent = getUserAgent(request)
+    const acceptLanguage = request.headers.get('accept-language') || 'Unknown'
+
     // Rate limiting - strict for login attempts
     const clientId = getClientIdentifier(request)
     const rateLimitResult = await authRateLimit(clientId)
     
     if (!rateLimitResult.allowed) {
+      await logSecurityEventSafely(request, {
+        type: 'failed_auth',
+        severity: 'high',
+        ipAddress: clientIP,
+        deviceInfo: {
+          userAgent,
+          platform: 'Unknown',
+          language: acceptLanguage,
+        },
+        details: `Login rate limit exceeded for ${clientId}`,
+      })
+
       return NextResponse.json(
         { error: rateLimitResult.message },
         { 
@@ -47,6 +70,18 @@ export async function POST(request: NextRequest) {
     // Check if account is locked from brute force attempts
     const accountLocked = isAccountLocked(clientId)
     if (accountLocked) {
+      await logSecurityEventSafely(request, {
+        type: 'failed_auth',
+        severity: 'high',
+        ipAddress: clientIP,
+        deviceInfo: {
+          userAgent,
+          platform: 'Unknown',
+          language: acceptLanguage,
+        },
+        details: `Blocked login attempt for locked identifier ${clientId}`,
+      })
+
       return NextResponse.json(
         { error: 'Account temporarily locked due to too many failed login attempts. Please try again in 30 minutes.' },
         { status: 423 } // 423 Locked
@@ -64,17 +99,22 @@ export async function POST(request: NextRequest) {
     
     const { email, password } = validation.data
 
-    // Get client IP and User Agent early
-    const clientIP = request.headers.get('x-forwarded-for') || 
-                     request.headers.get('x-real-ip') || 
-                     'unknown'
-    const userAgent = request.headers.get('user-agent') || 'Unknown'
-
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() })
     if (!user) {
       // Record failed attempt
       const attempt = recordLoginAttempt(clientId, false)
+      await logSecurityEventSafely(request, {
+        type: 'failed_auth',
+        severity: 'medium',
+        ipAddress: clientIP,
+        deviceInfo: {
+          userAgent,
+          platform: 'Unknown',
+          language: acceptLanguage,
+        },
+        details: `Failed login attempt for unknown account ${email}`,
+      })
       return NextResponse.json(
         { 
           error: 'Invalid email or password',
@@ -89,6 +129,17 @@ export async function POST(request: NextRequest) {
     if (!isValidPassword) {
       // Record failed attempt
       const attempt = recordLoginAttempt(clientId, false)
+      await logSecurityEventSafely(request, {
+        type: 'failed_auth',
+        severity: 'medium',
+        ipAddress: clientIP,
+        deviceInfo: {
+          userAgent,
+          platform: 'Unknown',
+          language: acceptLanguage,
+        },
+        details: `Failed login attempt for ${email}`,
+      })
       
       // Log failed login audit
       await logAudit({
@@ -126,16 +177,12 @@ export async function POST(request: NextRequest) {
     const csrfToken = generateCSRFToken(sessionId)
     
     // Generate JWT access token
-    const token = jwt.sign(
-      { 
-        userId: (user as any)._id,
-        email: user.email,
-        role: user.role,
-        sessionId
-      },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    )
+    const token = createAuthToken({
+      userId: (user as any)._id.toString(),
+      email: user.email,
+      role: user.role,
+      sessionId,
+    })
     
     // Generate refresh token
     const refreshToken = generateRefreshToken((user as any)._id.toString())
@@ -170,27 +217,13 @@ export async function POST(request: NextRequest) {
     // Remove password from response
     const userObject = user.toObject()
     const { password: _, ...userResponse } = userObject
+    const publicUser = toPublicUser(userResponse)
 
     // Set cookies
     const response = NextResponse.json({
       success: true,
       message: 'Login successful',
-      user: {
-        id: userResponse._id,
-        email: userResponse.email,
-        firstName: userResponse.firstName,
-        lastName: userResponse.lastName,
-        dateOfBirth: userResponse.dateOfBirth,
-        gender: userResponse.gender,
-        phone: userResponse.phone,
-        address: userResponse.address,
-        city: userResponse.city,
-        state: userResponse.state,
-        zipCode: userResponse.zipCode,
-        bloodType: userResponse.bloodType,
-        emergencyContact: userResponse.emergencyContact,
-        registeredDate: userResponse.createdAt
-      },
+      user: publicUser,
       token,
       refreshToken,
       csrfToken,

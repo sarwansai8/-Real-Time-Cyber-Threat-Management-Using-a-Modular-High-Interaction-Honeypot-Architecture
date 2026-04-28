@@ -1,8 +1,9 @@
 'use client'
 
 import { AdminNav } from '@/components/admin-nav'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/components/auth-context'
 
 export default function AdminLayout({
   children,
@@ -10,24 +11,19 @@ export default function AdminLayout({
   children: React.ReactNode
 }) {
   const router = useRouter()
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const { user, isLoading } = useAuth()
+  const isAuthenticated = user?.role === 'admin'
 
   useEffect(() => {
-    // Check if admin is authenticated
-    const adminSession = localStorage.getItem('adminSession')
-    if (!adminSession) {
-      router.push('/admin/login')
-    } else {
-      setIsAuthenticated(true)
+    if (!isLoading && !isAuthenticated) {
+        router.push('/admin/login')
     }
-    setIsLoading(false)
-  }, [router])
+  }, [isAuthenticated, isLoading, router])
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
+        <p className="text-muted-foreground">Loading admin session...</p>
       </div>
     )
   }

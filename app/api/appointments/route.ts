@@ -1,80 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
 import connectDB from '@/lib/db'
 import { Appointment } from '@/lib/models'
 import { logAudit } from '@/lib/audit-logger'
+import {
+  appointmentSchema,
+  appointmentUpdateSchema,
+  mongoIdSchema,
+  sanitizeObject,
+  validateRequest,
+} from '@/lib/validations'
+import { getAuthenticatedUser, getClientIp, getUserAgent } from '@/lib/auth'
+import { escapeRegex } from '@/lib/utils'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-
-function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value || 
-                 request.headers.get('authorization')?.replace('Bearer ', '')
-  
-  if (!token) return null
-  
-  try {
-    return jwt.verify(token, JWT_SECRET) as any
-  } catch {
-    return null
-  }
-}
-
-// GET - Fetch all appointments for user with pagination and search
 export async function GET(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     await connectDB()
-    
+
     const { searchParams } = new URL(request.url)
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '50')
-    const search = searchParams.get('search') || ''
-    const status = searchParams.get('status') || ''
-    
-    // Build query
-    const query: any = { userId: user.userId }
-    
+    const page = Math.max(Number.parseInt(searchParams.get('page') || '1', 10) || 1, 1)
+    const limit = Math.min(Math.max(Number.parseInt(searchParams.get('limit') || '50', 10) || 50, 1), 100)
+    const search = searchParams.get('search')?.trim() || ''
+    const status = searchParams.get('status')?.trim() || ''
+
+    const query: Record<string, unknown> = { userId: user.userId }
+
     if (status && status !== 'all') {
       query.status = status
     }
-    
+
     if (search) {
+      const pattern = escapeRegex(search)
       query.$or = [
-        { doctorName: { $regex: search, $options: 'i' } },
-        { specialty: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { notes: { $regex: search, $options: 'i' } }
+        { doctorName: { $regex: pattern, $options: 'i' } },
+        { specialty: { $regex: pattern, $options: 'i' } },
+        { location: { $regex: pattern, $options: 'i' } },
+        { notes: { $regex: pattern, $options: 'i' } },
       ]
     }
-    
+
     const skip = (page - 1) * limit
-    
-    // Parallel execution for count and data
+
     const [total, appointments] = await Promise.all([
       Appointment.countDocuments(query),
       Appointment.find(query)
-        .select('-__v') // Exclude version field
+        .select('-__v')
         .sort({ date: -1 })
         .skip(skip)
         .limit(limit)
-        .lean() // Convert to plain JS objects (faster)
+        .lean(),
     ])
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       appointments,
       pagination: {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
-      }
+        pages: Math.ceil(total / limit),
+      },
     })
-
   } catch (error: any) {
     console.error('Fetch appointments error:', error)
     return NextResponse.json(
@@ -84,38 +74,41 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create new appointment
 export async function POST(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     await connectDB()
-    
+
     const body = await request.json()
-    
+    const validation = validateRequest(appointmentSchema, sanitizeObject(body))
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
+    }
+
     const appointment = await Appointment.create({
-      ...body,
-      userId: user.userId
+      ...validation.data,
+      userId: user.userId,
     })
 
-    // Log audit
-    const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    const userAgent = request.headers.get('user-agent') || 'unknown'
     await logAudit({
       userId: user.userId,
       action: 'create',
       resource: 'appointments',
       resourceId: (appointment as any)._id.toString(),
       details: { method: 'POST', endpoint: '/api/appointments' },
-      ipAddress,
-      userAgent,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
     })
 
     return NextResponse.json({ success: true, appointment }, { status: 201 })
-
   } catch (error: any) {
     console.error('Create appointment error:', error)
     return NextResponse.json(
@@ -125,31 +118,48 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH - Update appointment
 export async function PATCH(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     await connectDB()
-    
-    const body = await request.json()
-    const { id, ...updates } = body
 
+    const body = await request.json()
+    const validation = validateRequest(appointmentUpdateSchema, sanitizeObject(body))
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
+    }
+
+    const { id, ...updates } = validation.data
     const appointment = await Appointment.findOneAndUpdate(
       { _id: id, userId: user.userId },
-      updates,
-      { new: true }
+      { $set: updates },
+      { new: true, runValidators: true }
     )
 
     if (!appointment) {
       return NextResponse.json({ error: 'Appointment not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, appointment })
+    await logAudit({
+      userId: user.userId,
+      action: 'update',
+      resource: 'appointments',
+      resourceId: id,
+      details: { method: 'PATCH', endpoint: '/api/appointments', changes: updates },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+      severity: 'warning',
+    })
 
+    return NextResponse.json({ success: true, appointment })
   } catch (error: any) {
     console.error('Update appointment error:', error)
     return NextResponse.json(
@@ -159,34 +169,44 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// DELETE - Delete appointment
 export async function DELETE(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     await connectDB()
-    
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
+    const idValidation = validateRequest(mongoIdSchema, id)
 
-    if (!id) {
+    if (!idValidation.success) {
       return NextResponse.json({ error: 'Appointment ID required' }, { status: 400 })
     }
 
     const appointment = await Appointment.findOneAndDelete({
-      _id: id,
-      userId: user.userId
+      _id: idValidation.data,
+      userId: user.userId,
     })
 
     if (!appointment) {
       return NextResponse.json({ error: 'Appointment not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, message: 'Appointment deleted' })
+    await logAudit({
+      userId: user.userId,
+      action: 'delete',
+      resource: 'appointments',
+      resourceId: idValidation.data,
+      details: { method: 'DELETE', endpoint: '/api/appointments' },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+      severity: 'warning',
+    })
 
+    return NextResponse.json({ success: true, message: 'Appointment deleted' })
   } catch (error: any) {
     console.error('Delete appointment error:', error)
     return NextResponse.json(

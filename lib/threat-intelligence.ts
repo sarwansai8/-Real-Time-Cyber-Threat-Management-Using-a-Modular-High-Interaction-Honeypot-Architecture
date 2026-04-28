@@ -104,7 +104,8 @@ const THREAT_SIGNATURES: ThreatSignature[] = [
     name: 'Command Injection',
     severity: 'critical',
     patterns: [
-      /[;&|`$(){}[\]<>]/,
+      /(?:;|&&|\|\||`)/,
+      /\$\([^)]*\)/,
       /\b(wget|curl|nc|netcat|bash|sh|cmd|powershell)\b/i,
     ],
     indicators: ['wget', 'curl', 'nc', 'bash', 'cmd.exe', 'powershell'],
@@ -116,10 +117,10 @@ const THREAT_SIGNATURES: ThreatSignature[] = [
     name: 'Reconnaissance Scanning',
     severity: 'medium',
     patterns: [
-      /\/(admin|administrator|wp-admin|phpmyadmin|config|\.git|\.env)/i,
+      /\/(administrator|wp-admin|phpmyadmin|config|\.git|\.env)/i,
       /\.(sql|bak|old|backup|conf|log)$/i,
     ],
-    indicators: ['/admin', '/.git', '/.env', 'phpmyadmin', '.sql', '.bak'],
+    indicators: ['/.git', '/.env', 'phpmyadmin', 'wp-admin', '.sql', '.bak'],
     ttl: 1800000,
     category: 'reconnaissance'
   }
@@ -132,6 +133,21 @@ class ThreatIntelligenceEngine {
   private attackHistory: AttackPattern[] = []
   private readonly BLOCK_THRESHOLD = 75 // Auto-block above this score
   private readonly SUSPICIOUS_THRESHOLD = 50
+  private readonly HONEYPOT_PATHS = [
+    '/api/admin/config',
+    '/api/admin/debug',
+    '/api/admin/logs',
+    '/api/auth/admin',
+    '/api/auth/token',
+    '/api/user/password',
+    '/api/data/export-all',
+    '/api/patients/all',
+    '/api/records/dump',
+    '/api/debug/sql',
+    '/api/health/detailed',
+    '/.env',
+    '/.git',
+  ]
 
   constructor() {
     this.loadBlockList()
@@ -202,31 +218,34 @@ class ThreatIntelligenceEngine {
     // Factor 3: Signature-based detection
     const fullRequest = `${path}${query}${JSON.stringify(body)}`
     for (const signature of THREAT_SIGNATURES) {
-      for (const pattern of signature.patterns) {
-        if (pattern.test(fullRequest)) {
-          const score = this.getSeverityScore(signature.severity)
-          factors.push({
-            factor: signature.name,
-            score,
-            weight: 0.9,
-            description: `Attack pattern detected: ${signature.category}`
-          })
-          overallRisk += score * 0.9
+      const matchedPatterns = signature.patterns.filter(pattern => pattern.test(fullRequest))
+      if (matchedPatterns.length === 0) {
+        continue
+      }
 
-          // Log attack
-          threat.attacks.push({
-            type: signature.category,
-            timestamp: new Date(),
-            payload: fullRequest.substring(0, 200),
-            endpoint: path,
-            method,
-            blocked: false
-          })
+      const score = this.getSeverityScore(signature.severity)
+      factors.push({
+        factor: signature.name,
+        score,
+        weight: 0.9,
+        description: `Attack pattern detected: ${signature.category}`
+      })
+      overallRisk += score * 0.9
 
-          if (!threat.attackVectors.includes(signature.category)) {
-            threat.attackVectors.push(signature.category)
-          }
-        }
+      const attack: AttackPattern = {
+        type: signature.category,
+        timestamp: new Date(),
+        payload: fullRequest.substring(0, 200),
+        endpoint: path,
+        method,
+        blocked: false
+      }
+
+      threat.attacks.push(attack)
+      this.attackHistory.push(attack)
+
+      if (!threat.attackVectors.includes(signature.category)) {
+        threat.attackVectors.push(signature.category)
       }
     }
 
@@ -243,7 +262,7 @@ class ThreatIntelligenceEngine {
     }
 
     // Factor 5: Honeypot interaction
-    if (path.includes('/api/admin/') || path.includes('/.env') || path.includes('/.git')) {
+    if (this.HONEYPOT_PATHS.some(trapPath => path.includes(trapPath))) {
       factors.push({
         factor: 'Honeypot Triggered',
         score: 80,
@@ -297,10 +316,13 @@ class ThreatIntelligenceEngine {
       autoBlock = true
       this.blockList.add(ip)
       threat.blockedCount++
+      this.saveBlockList()
     } else if (overallRisk >= 60) {
       recommendation = 'challenge'
     } else if (overallRisk >= this.SUSPICIOUS_THRESHOLD) {
       recommendation = 'monitor'
+    } else {
+      threat.reputation = 'clean'
     }
 
     // Log high-risk activity
@@ -429,6 +451,7 @@ class ThreatIntelligenceEngine {
       threat.reputation = 'known_attacker'
       threat.threatScore = 100
     }
+    this.saveBlockList()
     logger.security(`IP ${ip} manually blocked: ${reason}`)
   }
 
@@ -442,6 +465,7 @@ class ThreatIntelligenceEngine {
       threat.reputation = 'clean'
       threat.threatScore = 0
     }
+    this.saveBlockList()
     logger.info(`IP ${ip} unblocked`)
   }
 

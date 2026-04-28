@@ -66,50 +66,10 @@ export default function VaccinationsPage() {
       })))
     } catch (err) {
       console.error('Fetch error:', err)
-      // Fallback to sample data
-      const samples: Vaccination[] = [
-        {
-          id: 'vac_1',
-          name: 'COVID-19 (Pfizer)',
-          date: '2025-03-15',
-          provider: 'City Vaccination Center',
-          batchNumber: 'PF2025001',
-          nextDue: '2026-03-15',
-          status: 'completed',
-          certificateNumber: 'CERT-2025-001'
-        },
-        {
-          id: 'vac_2',
-          name: 'Influenza (Flu)',
-          date: '2025-10-20',
-          provider: 'City Medical Center',
-          batchNumber: 'FLU2025102',
-          nextDue: '2026-10-20',
-          status: 'completed',
-          certificateNumber: 'CERT-2025-002'
-        },
-        {
-          id: 'vac_3',
-          name: 'Tetanus Booster',
-          date: '2024-05-10',
-          provider: 'General Hospital',
-          batchNumber: 'TET2024051',
-          nextDue: '2034-05-10',
-          status: 'completed',
-          certificateNumber: 'CERT-2024-001'
-        },
-        {
-          id: 'vac_4',
-          name: 'Polio (IPV)',
-          date: '2025-08-05',
-          provider: 'Health Department',
-          batchNumber: 'POL2025080',
-          nextDue: '2030-08-05',
-          status: 'completed',
-          certificateNumber: 'CERT-2025-003'
-        }
-      ]
-      setVaccinations(samples)
+      setVaccinations([])
+      toast.error('Failed to load vaccination records', {
+        description: err instanceof Error ? err.message : 'Please try again shortly.',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -123,7 +83,9 @@ export default function VaccinationsPage() {
         description: 'Please fill in Vaccine Name, Date, and Provider fields.'
       })
       return
-    }    try {
+    }
+
+    try {
       const response = await fetch('/api/vaccinations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -170,6 +132,39 @@ export default function VaccinationsPage() {
       console.error('Add vaccination error:', err)
       toast.error('Failed to add vaccination', { description: err.message })
     }
+  }
+
+  const getVaccinationName = (vaccination: Vaccination) =>
+    vaccination.vaccineName || vaccination.name || 'Vaccination Record'
+
+  const getNextDueValue = (vaccination: Vaccination) =>
+    vaccination.nextDueDate || vaccination.nextDue || ''
+
+  const downloadCertificate = (vaccination: Vaccination) => {
+    const certificateNumber = vaccination.certificateNumber || `CERT-${vaccination.id}`
+    const content = [
+      'Vaccination Certificate',
+      '======================',
+      `Vaccine: ${getVaccinationName(vaccination)}`,
+      `Date Administered: ${new Date(vaccination.date).toLocaleDateString()}`,
+      `Provider: ${vaccination.provider}`,
+      `Batch Number: ${vaccination.batchNumber || 'N/A'}`,
+      `Next Due Date: ${getNextDueValue(vaccination) ? new Date(getNextDueValue(vaccination)).toLocaleDateString() : 'N/A'}`,
+      `Certificate Number: ${certificateNumber}`,
+      `Status: ${vaccination.status}`,
+      '',
+      vaccination.notes ? `Notes: ${vaccination.notes}` : 'Notes: None'
+    ].join('\n')
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${getVaccinationName(vaccination).toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'vaccination'}_certificate.txt`
+    anchor.click()
+    URL.revokeObjectURL(url)
+
+    toast.success('Certificate downloaded', { description: `${getVaccinationName(vaccination)} certificate is ready.` })
   }
 
   const filteredVaccinations = vaccinations.filter(vac => {
@@ -291,7 +286,7 @@ export default function VaccinationsPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold text-foreground">{vaccination.name}</h3>
+                        <h3 className="font-semibold text-foreground">{getVaccinationName(vaccination)}</h3>
                         <Badge className={vaccination.status === 'completed' ? 'bg-secondary text-secondary-foreground' : 'bg-accent text-accent-foreground'}>
                           {vaccination.status === 'completed' ? 'Completed' : 'Pending'}
                         </Badge>
@@ -311,15 +306,21 @@ export default function VaccinationsPage() {
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Next Due</p>
-                          <p className="font-medium text-sm">{vaccination.nextDue ? new Date(vaccination.nextDue).toLocaleDateString() : 'N/A'}</p>
+                          <p className="font-medium text-sm">{getNextDueValue(vaccination) ? new Date(getNextDueValue(vaccination)).toLocaleDateString() : 'N/A'}</p>
                         </div>
                       </div>
                       <div className="mt-3 pt-3 border-t border-border">
-                        <p className="text-xs text-muted-foreground">Certificate Number: <span className="font-mono text-foreground">{vaccination.certificateNumber}</span></p>
+                        <p className="text-xs text-muted-foreground">Certificate Number: <span className="font-mono text-foreground">{vaccination.certificateNumber || `CERT-${vaccination.id}`}</span></p>
                       </div>
                     </div>
                   </div>
-                  <Button variant="outline" size="icon" title="Download Certificate" className="flex-shrink-0">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    title="Download Certificate"
+                    className="flex-shrink-0"
+                    onClick={() => downloadCertificate(vaccination)}
+                  >
                     <Download className="w-4 h-4" />
                   </Button>
                 </div>

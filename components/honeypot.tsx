@@ -18,8 +18,8 @@ export function Honeypot({ onTrigger }: HoneypotProps) {
     // Original 4 fields
     website: '',
     company: '',
-    phone: '',
-    address: '',
+    honeypot_phone: '',
+    honeypot_address: '',
     
     // NEW: Advanced honeypot fields
     url: '',
@@ -133,10 +133,10 @@ export function Honeypot({ onTrigger }: HoneypotProps) {
       <div style={{ visibility: 'hidden', position: 'absolute' }} aria-hidden="true">
         <input
           type="tel"
-          name="phone-number"
-          id="phone-number"
-          value={values.phone}
-          onChange={(e) => setValues(prev => ({ ...prev, phone: e.target.value }))}
+          name="honeypot-phone"
+          id="honeypot-phone"
+          value={values.honeypot_phone}
+          onChange={(e) => setValues(prev => ({ ...prev, honeypot_phone: e.target.value }))}
           autoComplete="off"
           tabIndex={-1}
         />
@@ -155,10 +155,10 @@ export function Honeypot({ onTrigger }: HoneypotProps) {
       <div style={{ opacity: 0, position: 'absolute', pointerEvents: 'none' }} aria-hidden="true">
         <input
           type="text"
-          name="address"
-          id="address"
-          value={values.address}
-          onChange={(e) => setValues(prev => ({ ...prev, address: e.target.value }))}
+          name="honeypot-address"
+          id="honeypot-address"
+          value={values.honeypot_address}
+          onChange={(e) => setValues(prev => ({ ...prev, honeypot_address: e.target.value }))}
           autoComplete="off"
           tabIndex={-1}
         />

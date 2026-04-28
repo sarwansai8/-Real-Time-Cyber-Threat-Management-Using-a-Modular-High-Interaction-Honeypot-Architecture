@@ -72,43 +72,7 @@ export default function AppointmentsPage() {
       console.error('Fetch error:', err)
       setError(err.message)
       toast.error('Failed to load appointments', { description: err.message })
-      // Fallback to sample data for demo
-      const samples: Appointment[] = [
-        {
-          id: 'apt_1',
-          doctorName: 'Dr. Sarah Smith',
-          specialty: 'General Practitioner',
-          date: '2025-11-20',
-          time: '14:00',
-          location: 'City Medical Center, Room 201',
-          status: 'scheduled',
-          phone: '(555) 123-4567',
-          notes: 'Annual checkup'
-        },
-        {
-          id: 'apt_2',
-          doctorName: 'Dr. James Wilson',
-          specialty: 'Cardiology',
-          date: '2025-11-25',
-          time: '10:30',
-          location: 'Heart Care Clinic, Room 105',
-          status: 'scheduled',
-          phone: '(555) 234-5678',
-          notes: 'Follow-up consultation'
-        },
-        {
-          id: 'apt_3',
-          doctorName: 'Dr. Emily Chen',
-          specialty: 'Dentistry',
-          date: '2025-11-10',
-          time: '09:00',
-          location: 'Dental Clinic, Floor 2',
-          status: 'completed',
-          phone: '(555) 345-6789',
-          notes: 'Regular cleaning'
-        }
-      ]
-      setAppointments(samples)
+      setAppointments([])
     } finally {
       setIsLoading(false)
     }

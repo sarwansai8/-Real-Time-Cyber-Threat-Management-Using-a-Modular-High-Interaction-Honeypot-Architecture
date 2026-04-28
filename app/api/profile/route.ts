@@ -1,42 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
 import connectDB from '@/lib/db'
 import { User } from '@/lib/models'
 import { logAudit } from '@/lib/audit-logger'
+import { profileUpdateSchema, sanitizeObject, validateRequest } from '@/lib/validations'
+import { getAuthenticatedUser, getClientIp, getUserAgent, toPublicUser } from '@/lib/auth'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-
-function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value || 
-                 request.headers.get('authorization')?.replace('Bearer ', '')
-  
-  if (!token) return null
-  
-  try {
-    return jwt.verify(token, JWT_SECRET) as any
-  } catch {
-    return null
-  }
-}
-
-// GET - Fetch user profile
 export async function GET(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     await connectDB()
-    
-    const userProfile = await User.findById(user.userId).select('-password -__v')
-    
+
+    const userProfile = await User.findById(user.userId).select('-password -__v').lean()
+
     if (!userProfile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, user: userProfile })
-
+    return NextResponse.json({ success: true, user: toPublicUser(userProfile as any) })
   } catch (error: any) {
     console.error('Fetch profile error:', error)
     return NextResponse.json(
@@ -46,28 +30,28 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PATCH - Update user profile
 export async function PATCH(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     await connectDB()
-    
+
     const body = await request.json()
-    
-    // Remove fields that shouldn't be updated
-    delete body.email // Email changes require verification
-    delete body.password // Password changes use different endpoint
-    delete body.role // Role changes require admin
-    delete body._id
-    delete body.id
-    
+    const validation = validateRequest(profileUpdateSchema, sanitizeObject(body))
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
       user.userId,
-      { $set: body },
+      { $set: validation.data },
       { new: true, runValidators: true }
     ).select('-password -__v')
 
@@ -75,21 +59,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Log audit
-    const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    const userAgent = request.headers.get('user-agent') || 'unknown'
     await logAudit({
       userId: user.userId,
       action: 'update',
       resource: 'profile',
       resourceId: user.userId,
-      details: { updatedFields: Object.keys(body) },
-      ipAddress,
-      userAgent,
+      details: { updatedFields: Object.keys(validation.data) },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
     })
 
-    return NextResponse.json({ success: true, user: updatedUser })
-
+    return NextResponse.json({ success: true, user: toPublicUser(updatedUser.toObject() as any) })
   } catch (error: any) {
     console.error('Update profile error:', error)
     return NextResponse.json(

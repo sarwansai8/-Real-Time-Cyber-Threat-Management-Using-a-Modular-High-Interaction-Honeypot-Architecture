@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/components/auth-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,6 +28,25 @@ export default function ProfilePage() {
     bloodType: user?.bloodType || '',
     emergencyContact: user?.emergencyContact || ''
   })
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    setFormData({
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      address: user.address || '',
+      city: user.city || '',
+      state: user.state || '',
+      zipCode: user.zipCode || '',
+      bloodType: user.bloodType || '',
+      emergencyContact: user.emergencyContact || ''
+    })
+  }, [user])
 
   const handleSave = async () => {
     setIsSaving(true)

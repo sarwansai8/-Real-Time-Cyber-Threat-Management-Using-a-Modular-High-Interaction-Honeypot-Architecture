@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
-import connectDB from '@/lib/db'
 import { SecurityEvent } from '@/lib/models'
+import connectDB from '@/lib/db'
+import { createSecurityEvent } from '@/lib/security-events'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
 
@@ -30,12 +31,12 @@ export async function GET(request: NextRequest) {
     
     const { searchParams } = new URL(request.url)
     const severity = searchParams.get('severity')
-    const eventType = searchParams.get('eventType')
+    const eventType = searchParams.get('type') || searchParams.get('eventType')
     const limit = parseInt(searchParams.get('limit') || '100')
     
     let query: any = {}
     if (severity) query.severity = severity
-    if (eventType) query.eventType = eventType
+    if (eventType) query.type = eventType
 
     const events = await SecurityEvent.find(query)
       .sort({ timestamp: -1 })
@@ -62,8 +63,7 @@ export async function POST(request: NextRequest) {
     await connectDB()
     
     const body = await request.json()
-    
-    const event = await SecurityEvent.create(body)
+    const event = await createSecurityEvent(body, { request })
 
     return NextResponse.json({ success: true, event }, { status: 201 })
 
@@ -87,18 +87,27 @@ export async function DELETE(request: NextRequest) {
     await connectDB()
     
     const { searchParams } = new URL(request.url)
+    const deleteAll = searchParams.get('all') === 'true'
     const days = parseInt(searchParams.get('days') || '30')
-    
-    const cutoffDate = new Date()
-    cutoffDate.setDate(cutoffDate.getDate() - days)
 
-    const result = await SecurityEvent.deleteMany({
-      timestamp: { $lt: cutoffDate }
-    })
+    let result
+
+    if (deleteAll || days <= 0) {
+      result = await SecurityEvent.deleteMany({})
+    } else {
+      const cutoffDate = new Date()
+      cutoffDate.setDate(cutoffDate.getDate() - days)
+
+      result = await SecurityEvent.deleteMany({
+        timestamp: { $lt: cutoffDate }
+      })
+    }
 
     return NextResponse.json({ 
       success: true, 
-      message: `Deleted ${result.deletedCount} events older than ${days} days` 
+      message: deleteAll || days <= 0
+        ? `Deleted ${result.deletedCount} security events`
+        : `Deleted ${result.deletedCount} events older than ${days} days`
     })
 
   } catch (error: any) {

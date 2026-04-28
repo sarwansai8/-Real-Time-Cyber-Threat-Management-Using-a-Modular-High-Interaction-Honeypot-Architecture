@@ -36,12 +36,15 @@ export default function DashboardPage() {
   const [statsLoaded, setStatsLoaded] = useState(false)
 
   useEffect(() => {
-    fetchDashboardStats()
-    // Welcome toast
-    toast.success(`Welcome back, ${user?.firstName}!`, {
+    if (!user) {
+      return
+    }
+
+    void fetchDashboardStats()
+    toast.success(`Welcome back, ${user.firstName}!`, {
       description: 'Your health dashboard is ready.',
     })
-  }, [])
+  }, [user])
 
   const fetchDashboardStats = async () => {
     try {
@@ -82,22 +85,6 @@ export default function DashboardPage() {
       toast.error('Failed to load some dashboard data', {
         description: 'Some information may be unavailable.',
       })
-      // Fallback to localStorage for backward compatibility
-      const storedAppointments = JSON.parse(localStorage.getItem('portalAppointments') || '[]')
-      const upcomingCount = storedAppointments.filter((a: any) => new Date(a.date) > new Date()).length
-      setUpcomingAppointments(upcomingCount)
-
-      const storedRecords = JSON.parse(localStorage.getItem('portalMedicalRecords') || '[]')
-      setTotalRecords(storedRecords.length)
-
-      const storedVaccinations = JSON.parse(localStorage.getItem('portalVaccinations') || '[]')
-      if (storedVaccinations.length > 0) {
-        const latest = storedVaccinations.sort((a: any, b: any) =>
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        )[0]
-        setLastVaccination(new Date(latest.date).toLocaleDateString())
-      }
-
       setStatsLoaded(true)
     }
   }

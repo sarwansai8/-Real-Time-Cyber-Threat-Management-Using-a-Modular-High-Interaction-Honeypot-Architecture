@@ -47,10 +47,16 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    if (honeypotTriggered) {
+      setError('Suspicious activity detected. Please refresh the page and try again.')
+      return
+    }
+
     setIsLoading(true)
 
     try {
-      await login(email, password)
+      const user = await login(email, password)
       
       const monitor = getSecurityMonitor()
       monitor.logEvent(
@@ -59,7 +65,7 @@ export default function LoginPage() {
         `Successful login for ${email}`
       )
 
-      router.push('/dashboard')
+      router.push(user.role === 'admin' ? '/admin' : '/dashboard')
     } catch (err) {
       const monitor = getSecurityMonitor()
       monitor.logEvent(
@@ -119,7 +125,7 @@ export default function LoginPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password" className="font-semibold">Password</Label>
-                <Link href="#" className="text-xs text-primary hover:underline">
+                <Link href="/auth/forgot-password" className="text-xs text-primary hover:underline">
                   Forgot password?
                 </Link>
               </div>

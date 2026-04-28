@@ -1,7 +1,9 @@
 // Advanced Honeypot System - Elite Bot Trap
 // Multiple layers of invisible traps to catch sophisticated bots
+// Enhanced with Intelligence Engine: JS traps, DOM mutation, canary tokens, attacker profiling
 
 import { getSecurityMonitor } from './security-monitor'
+import { runJSTrapChecks, setupDOMMutationTrap, profileAttacker, type Detection, type AttackerProfile } from './honeypot-intelligence'
 
 export interface HoneypotTrap {
   type: 'field' | 'timing' | 'mouse' | 'keyboard' | 'behavioral' | 'api' | 'link'
@@ -16,6 +18,8 @@ export interface HoneypotResult {
   trapsTriggered: HoneypotTrap[]
   totalScore: number
   recommendation: 'allow' | 'challenge' | 'block'
+  intelligenceDetections: Detection[]
+  attackerProfile: AttackerProfile | null
 }
 
 class AdvancedHoneypotSystem {
@@ -31,10 +35,15 @@ class AdvancedHoneypotSystem {
   private lastMousePos: { x: number; y: number } = { x: 0, y: 0 }
   private scrollEvents: number = 0
   private copyPasteEvents: number = 0
+  private intelligenceDetections: Detection[] = []
+  private domMutationObserver: MutationObserver | null = null
+  private touchEvents: number = 0
+  private accelerometerAvailable: boolean = false
 
   constructor() {
     if (typeof window !== 'undefined') {
       this.initializeTracking()
+      this.initializeIntelligence()
     }
   }
 
@@ -92,6 +101,30 @@ class AdvancedHoneypotSystem {
         this.fieldFocusCount++
       }
     })
+
+    // Touch event tracking (real mobile has touch)
+    document.addEventListener('touchstart', () => { this.touchEvents++ })
+
+    // Check for accelerometer (only on real mobile devices)
+    if ('DeviceMotionEvent' in window) {
+      window.addEventListener('devicemotion', () => { this.accelerometerAvailable = true }, { once: true })
+    }
+  }
+
+  /**
+   * Initialize intelligence engine traps
+   */
+  private initializeIntelligence(): void {
+    // Run JS execution traps
+    this.intelligenceDetections = runJSTrapChecks()
+
+    // Setup DOM mutation honeypot (hidden admin form)
+    this.domMutationObserver = setupDOMMutationTrap((detection) => {
+      this.intelligenceDetections.push(detection)
+      // Immediate alert on DOM mutation
+      const monitor = getSecurityMonitor()
+      monitor.logEvent('honeypot_triggered', 'critical', `DOM mutation trap: ${detection.evidence}`)
+    })
   }
 
   /**
@@ -100,7 +133,7 @@ class AdvancedHoneypotSystem {
   checkHoneypotFields(): HoneypotTrap[] {
     const traps: HoneypotTrap[] = []
     const honeypotFields = [
-      'website', 'company', 'phone-number', 'address',
+      'website', 'company', 'honeypot-phone', 'honeypot-address',
       'url', 'organization', 'fax', 'business-name',
       'confirm-email', 'alternate-email', 'secondary-phone'
     ]
@@ -125,24 +158,24 @@ class AdvancedHoneypotSystem {
    */
   checkTiming(): HoneypotTrap | null {
     const timeElapsed = Date.now() - this.formStartTime
-    
-    // Form filled in less than 2 seconds
-    if (timeElapsed < 2000) {
-      return {
-        type: 'timing',
-        triggered: true,
-        score: 40,
-        details: `Form submitted in ${timeElapsed}ms (suspiciously fast)`
-      }
-    }
 
     // Form filled in less than 1 second with data
-    if (timeElapsed < 1000 && this.fieldFocusCount > 0) {
+    if (timeElapsed < 1000 && (this.fieldFocusCount > 0 || this.keystrokes > 0)) {
       return {
         type: 'timing',
         triggered: true,
         score: 50,
         details: `Form filled instantly: ${timeElapsed}ms`
+      }
+    }
+
+    // Form filled in less than 2 seconds with visible interaction
+    if (timeElapsed < 2000 && (this.fieldFocusCount > 0 || this.keystrokes > 0)) {
+      return {
+        type: 'timing',
+        triggered: true,
+        score: 30,
+        details: `Form submitted in ${timeElapsed}ms (suspiciously fast)`
       }
     }
 
@@ -269,12 +302,12 @@ class AdvancedHoneypotSystem {
     }
 
     // Instant field completion
-    if (this.keystrokes === 0 && this.fieldFocusCount > 0) {
+    if (this.keystrokes === 0 && this.fieldFocusCount > 0 && this.copyPasteEvents === 0) {
       traps.push({
         type: 'behavioral',
         triggered: true,
-        score: 40,
-        details: 'Fields filled without typing (script injection)'
+        score: 20,
+        details: 'Fields filled without typing or paste events'
       })
     }
 
@@ -346,8 +379,25 @@ class AdvancedHoneypotSystem {
     allTraps.push(...this.checkKeyboardBehavior())
     allTraps.push(...this.checkBehavioralPatterns())
 
-    // Calculate total score
-    const totalScore = allTraps.reduce((sum, trap) => sum + trap.score, 0)
+    // NEW: Check mobile spoofing (claiming mobile UA but no touch/accelerometer)
+    if (/mobile|android|iphone/i.test(navigator.userAgent) && this.touchEvents === 0) {
+      const timeElapsed = (Date.now() - this.formStartTime) / 1000
+      if (timeElapsed > 3) {
+        allTraps.push({
+          type: 'behavioral',
+          triggered: true,
+          score: 35,
+          details: 'Claims mobile User-Agent but zero touch events detected (desktop bot spoofing mobile)'
+        })
+      }
+    }
+
+    // NEW: Add intelligence engine detection scores
+    const intelScore = this.intelligenceDetections.reduce((sum, d) => sum + d.score, 0)
+
+    // Calculate total score (combine classic + intelligence)
+    const classicScore = allTraps.reduce((sum, trap) => sum + trap.score, 0)
+    const totalScore = classicScore + Math.min(intelScore, 80) // Cap intelligence at 80 to avoid false positives
     const confidence = Math.min(totalScore, 100)
     const isBot = confidence >= 50
 
@@ -356,13 +406,16 @@ class AdvancedHoneypotSystem {
     if (confidence >= 75) recommendation = 'block'
     else if (confidence >= 50) recommendation = 'challenge'
 
-    // Log to security monitor
+    // Profile the attacker
+    let attackerProfile: AttackerProfile | null = null
     if (isBot) {
+      attackerProfile = profileAttacker('client', navigator.userAgent, window.location.pathname, this.intelligenceDetections)
+
       const monitor = getSecurityMonitor()
       monitor.logEvent(
         'honeypot_triggered',
         confidence >= 75 ? 'critical' : confidence >= 50 ? 'high' : 'medium',
-        `Advanced honeypot detected bot: ${allTraps.length} traps triggered, confidence: ${confidence}%`
+        `Advanced honeypot detected ${attackerProfile.type}: ${allTraps.length} traps + ${this.intelligenceDetections.length} intel detections, confidence: ${confidence}%, tools: [${attackerProfile.tools.join(', ')}]`
       )
     }
 
@@ -371,7 +424,9 @@ class AdvancedHoneypotSystem {
       confidence,
       trapsTriggered: allTraps,
       totalScore,
-      recommendation
+      recommendation,
+      intelligenceDetections: this.intelligenceDetections,
+      attackerProfile
     }
   }
 
@@ -409,6 +464,12 @@ class AdvancedHoneypotSystem {
     this.lastMousePos = { x: 0, y: 0 }
     this.scrollEvents = 0
     this.copyPasteEvents = 0
+    this.intelligenceDetections = []
+    this.touchEvents = 0
+    if (this.domMutationObserver) {
+      this.domMutationObserver.disconnect()
+      this.domMutationObserver = null
+    }
   }
 }
 

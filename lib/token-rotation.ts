@@ -3,8 +3,8 @@
 
 import jwt from 'jsonwebtoken'
 import { getBotDetectionService } from './bot-detection'
+import { getJwtSecret } from './env'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'
 const ACCESS_TOKEN_EXPIRY = '5m' // 5 minutes (short-lived)
 const REFRESH_TOKEN_EXPIRY = '7d' // 7 days
 const ROTATION_INTERVAL = 4 * 60 * 1000 // 4 minutes (rotate before expiry)
@@ -51,7 +51,7 @@ export function generateAccessToken(payload: TokenPayload): string {
       tokenVersion: payload.tokenVersion || 1,
       type: 'access'
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: ACCESS_TOKEN_EXPIRY }
   )
 }
@@ -68,7 +68,7 @@ export function generateRefreshToken(payload: TokenPayload): string {
       tokenVersion: payload.tokenVersion || 1,
       type: 'refresh'
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: REFRESH_TOKEN_EXPIRY }
   )
   
@@ -124,7 +124,7 @@ export function verifyAccessToken(token: string): TokenPayload | null {
       return null
     }
     
-    const decoded = jwt.verify(token, JWT_SECRET) as any
+    const decoded = jwt.verify(token, getJwtSecret()) as any
     
     // Verify token type
     if (decoded.type !== 'access') {
@@ -154,7 +154,7 @@ export function verifyRefreshToken(token: string): TokenPayload | null {
       return null
     }
     
-    const decoded = jwt.verify(token, JWT_SECRET) as any
+    const decoded = jwt.verify(token, getJwtSecret()) as any
     
     // Verify token type
     if (decoded.type !== 'refresh') {

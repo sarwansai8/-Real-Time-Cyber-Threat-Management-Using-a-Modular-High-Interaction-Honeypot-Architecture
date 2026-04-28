@@ -1,48 +1,186 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { 
-  Shield, AlertTriangle, Activity, MapPin, Monitor, Mouse, Keyboard, 
-  TrendingUp, Eye, Clock, Globe, Trash2, RefreshCw 
+import {
+  Shield, AlertTriangle, Activity, MapPin, Monitor, Mouse, Keyboard,
+  TrendingUp, Eye, Clock, Globe, Trash2, RefreshCw
 } from 'lucide-react'
 import { getSecurityMonitor, type SecurityEvent } from '@/lib/security-monitor'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
+interface DashboardStatistics {
+  total: number
+  byType: Record<string, number>
+  bySeverity: Record<string, number>
+  uniqueIPs: number
+  avgHumanScore: number
+  recentEvents: SecurityEvent[]
+}
+
+function normalizeSecurityEvent(rawEvent: any): SecurityEvent {
+  return {
+    id: rawEvent._id?.toString?.() || rawEvent.id || `event_${rawEvent.timestamp}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: typeof rawEvent.timestamp === 'string'
+      ? rawEvent.timestamp
+      : new Date(rawEvent.timestamp || Date.now()).toISOString(),
+    type: rawEvent.type || 'suspicious_behavior',
+    severity: rawEvent.severity || 'medium',
+    ipAddress: rawEvent.ipAddress || 'unknown',
+    location: {
+      country: rawEvent.location?.country || 'Unknown',
+      city: rawEvent.location?.city || 'Unknown',
+      region: rawEvent.location?.region || 'Unknown',
+      timezone: rawEvent.location?.timezone || 'Unknown',
+      latitude: rawEvent.location?.latitude,
+      longitude: rawEvent.location?.longitude,
+    },
+    deviceInfo: {
+      userAgent: rawEvent.deviceInfo?.userAgent || 'Unknown',
+      platform: rawEvent.deviceInfo?.platform || 'Unknown',
+      language: rawEvent.deviceInfo?.language || 'Unknown',
+      screenResolution: rawEvent.deviceInfo?.screenResolution || 'Unknown',
+      timezone: rawEvent.deviceInfo?.timezone || 'Unknown',
+      cookiesEnabled: rawEvent.deviceInfo?.cookiesEnabled ?? false,
+      doNotTrack: rawEvent.deviceInfo?.doNotTrack ?? false,
+    },
+    behaviorMetrics: {
+      mouseMovements: rawEvent.behaviorMetrics?.mouseMovements ?? 0,
+      keystrokes: rawEvent.behaviorMetrics?.keystrokes ?? 0,
+      clickCount: rawEvent.behaviorMetrics?.clickCount ?? 0,
+      scrollDepth: rawEvent.behaviorMetrics?.scrollDepth ?? 0,
+      timeOnPage: rawEvent.behaviorMetrics?.timeOnPage ?? 0,
+      humanLikelihood: rawEvent.behaviorMetrics?.humanLikelihood ?? 0,
+    },
+    honeypotData: rawEvent.honeypotData ? {
+      fieldsFilled: rawEvent.honeypotData.fieldsFilled || [],
+      suspicionScore: rawEvent.honeypotData.suspicionScore ?? 0,
+    } : undefined,
+    sessionData: {
+      sessionId: rawEvent.sessionData?.sessionId || 'unknown',
+      pageViews: rawEvent.sessionData?.pageViews ?? 1,
+      referrer: rawEvent.sessionData?.referrer || '',
+    },
+    details: rawEvent.details || 'Security event recorded',
+  }
+}
+
+function calculateStatistics(events: SecurityEvent[]): DashboardStatistics {
+  const byType = events.reduce((acc, event) => {
+    acc[event.type] = (acc[event.type] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
+  const bySeverity = events.reduce((acc, event) => {
+    acc[event.severity] = (acc[event.severity] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
+  const total = events.length
+  const uniqueIPs = new Set(events.map(event => event.ipAddress)).size
+  const avgHumanScore = total > 0
+    ? Math.round(events.reduce((sum, event) => sum + event.behaviorMetrics.humanLikelihood, 0) / total)
+    : 0
+
+  return {
+    total,
+    byType,
+    bySeverity,
+    uniqueIPs,
+    avgHumanScore,
+    recentEvents: events.slice(0, 10),
+  }
+}
+
+function getLocalSecurityData(filter: {
+  type?: SecurityEvent['type']
+  severity?: SecurityEvent['severity']
+}) {
+  const monitor = getSecurityMonitor()
+  const events = monitor.getEvents({
+    ...filter,
+    limit: 50,
+  })
+
+  return {
+    events,
+    statistics: calculateStatistics(events),
+  }
+}
+
 export default function SecurityDashboardPage() {
   const [events, setEvents] = useState<SecurityEvent[]>([])
-  const [statistics, setStatistics] = useState<any>(null)
+  const [statistics, setStatistics] = useState<DashboardStatistics | null>(null)
   const [filter, setFilter] = useState<{
     type?: SecurityEvent['type']
     severity?: SecurityEvent['severity']
   }>({})
   const [selectedEvent, setSelectedEvent] = useState<SecurityEvent | null>(null)
+  const [dataSource, setDataSource] = useState<'api' | 'local'>('api')
 
   useEffect(() => {
-    loadData()
+    void loadData()
   }, [filter])
 
-  const loadData = () => {
-    if (typeof window !== 'undefined') {
-      const monitor = getSecurityMonitor()
-      const filteredEvents = monitor.getEvents({
-        ...filter,
-        limit: 50
+  const loadData = async () => {
+    const params = new URLSearchParams({ limit: '50' })
+
+    if (filter.type) {
+      params.set('type', filter.type)
+    }
+
+    if (filter.severity) {
+      params.set('severity', filter.severity)
+    }
+
+    try {
+      const response = await fetch(`/api/security-events?${params.toString()}`, {
+        cache: 'no-store',
       })
-      setEvents(filteredEvents)
-      setStatistics(monitor.getStatistics())
+
+      if (!response.ok) {
+        throw new Error(`Security events request failed with ${response.status}`)
+      }
+
+      const data = await response.json()
+      const normalizedEvents = Array.isArray(data.events)
+        ? data.events.map(normalizeSecurityEvent)
+        : []
+
+      setEvents(normalizedEvents)
+      setStatistics(calculateStatistics(normalizedEvents))
+      setDataSource('api')
+    } catch {
+      if (typeof window !== 'undefined') {
+        const localData = getLocalSecurityData(filter)
+        setEvents(localData.events)
+        setStatistics(localData.statistics)
+        setDataSource('local')
+      }
     }
   }
 
-  const clearAllEvents = () => {
-    if (confirm('Are you sure you want to clear all security events?')) {
+  const clearAllEvents = async () => {
+    if (!confirm('Are you sure you want to clear all security events?')) {
+      return
+    }
+
+    try {
+      await fetch('/api/security-events?all=true', { method: 'DELETE' })
+    } catch {
+      // Local cleanup still runs below as a fallback.
+    }
+
+    if (typeof window !== 'undefined') {
       const monitor = getSecurityMonitor()
       monitor.clearEvents()
-      loadData()
     }
+
+    setSelectedEvent(null)
+    await loadData()
   }
 
   const getSeverityColor = (severity: SecurityEvent['severity']) => {
@@ -62,6 +200,7 @@ export default function SecurityDashboardPage() {
       case 'bot_detected': return <Shield className="w-4 h-4" />
       case 'suspicious_behavior': return <Activity className="w-4 h-4" />
       case 'failed_auth': return <AlertTriangle className="w-4 h-4" />
+      case 'injection_attempt': return <AlertTriangle className="w-4 h-4" />
       default: return <Activity className="w-4 h-4" />
     }
   }
@@ -84,7 +223,6 @@ export default function SecurityDashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
@@ -94,19 +232,27 @@ export default function SecurityDashboardPage() {
           <p className="text-muted-foreground mt-1">Monitor threats, bots, and suspicious activities</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={loadData} variant="outline" size="sm">
+          <Button onClick={() => void loadData()} variant="outline" size="sm">
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
-          <Button onClick={clearAllEvents} variant="destructive" size="sm">
+          <Button onClick={() => void clearAllEvents()} variant="destructive" size="sm">
             <Trash2 className="w-4 h-4 mr-2" />
             Clear All
           </Button>
         </div>
       </div>
 
-      {/* Critical Alerts */}
-      {statistics.bySeverity.critical > 0 && (
+      {dataSource === 'local' && (
+        <Alert>
+          <AlertTriangle className="h-5 w-5" />
+          <AlertDescription>
+            Showing local browser events because the persisted security log API was unavailable.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {(statistics.bySeverity.critical || 0) > 0 && (
         <Alert variant="destructive" className="border-2">
           <AlertTriangle className="h-5 w-5" />
           <AlertDescription className="font-medium">
@@ -115,7 +261,6 @@ export default function SecurityDashboardPage() {
         </Alert>
       )}
 
-      {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border-border/50">
           <CardContent className="pt-6">
@@ -176,7 +321,6 @@ export default function SecurityDashboardPage() {
         </Card>
       </div>
 
-      {/* Event Types Breakdown */}
       <Card className="border-border/50">
         <CardHeader>
           <CardTitle>Event Types</CardTitle>
@@ -186,8 +330,8 @@ export default function SecurityDashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {Object.entries(statistics.byType).map(([type, count]) => (
               <div key={type} className="text-center p-4 rounded-lg bg-muted/30 border border-border">
-                <div className="flex justify-center mb-2">{getTypeIcon(type as any)}</div>
-                <p className="text-2xl font-bold">{count as number}</p>
+                <div className="flex justify-center mb-2">{getTypeIcon(type as SecurityEvent['type'])}</div>
+                <p className="text-2xl font-bold">{count}</p>
                 <p className="text-xs text-muted-foreground mt-1 capitalize">
                   {type.replace(/_/g, ' ')}
                 </p>
@@ -197,9 +341,8 @@ export default function SecurityDashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Filters */}
       <div className="flex gap-4">
-        <Select value={filter.type || 'all'} onValueChange={(val) => setFilter(prev => ({ ...prev, type: val === 'all' ? undefined : val as any }))}>
+        <Select value={filter.type || 'all'} onValueChange={(value) => setFilter(prev => ({ ...prev, type: value === 'all' ? undefined : value as SecurityEvent['type'] }))}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Filter by type" />
           </SelectTrigger>
@@ -210,10 +353,11 @@ export default function SecurityDashboardPage() {
             <SelectItem value="bot_detected">Bot Detected</SelectItem>
             <SelectItem value="suspicious_behavior">Suspicious</SelectItem>
             <SelectItem value="failed_auth">Failed Auth</SelectItem>
+            <SelectItem value="injection_attempt">Injection</SelectItem>
           </SelectContent>
         </Select>
 
-        <Select value={filter.severity || 'all'} onValueChange={(val) => setFilter(prev => ({ ...prev, severity: val === 'all' ? undefined : val as any }))}>
+        <Select value={filter.severity || 'all'} onValueChange={(value) => setFilter(prev => ({ ...prev, severity: value === 'all' ? undefined : value as SecurityEvent['severity'] }))}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Filter by severity" />
           </SelectTrigger>
@@ -227,7 +371,6 @@ export default function SecurityDashboardPage() {
         </Select>
       </div>
 
-      {/* Events List */}
       <Card className="border-border/50">
         <CardHeader>
           <CardTitle>Security Events ({events.length})</CardTitle>
@@ -299,7 +442,6 @@ export default function SecurityDashboardPage() {
                     </div>
                   </div>
 
-                  {/* Expanded Details */}
                   {selectedEvent?.id === event.id && (
                     <div className="mt-4 pt-4 border-t border-border space-y-3">
                       <div className="grid grid-cols-2 gap-4 text-sm">
@@ -322,7 +464,7 @@ export default function SecurityDashboardPage() {
                             <p><strong>Human Likelihood:</strong> {event.behaviorMetrics.humanLikelihood}%</p>
                             {event.honeypotData && (
                               <>
-                                <p className="text-red-600 font-semibold mt-2">⚠️ Honeypot Triggered!</p>
+                                <p className="text-red-600 font-semibold mt-2">Honeypot Triggered</p>
                                 <p><strong>Fields Filled:</strong> {event.honeypotData.fieldsFilled.join(', ')}</p>
                                 <p><strong>Suspicion Score:</strong> {event.honeypotData.suspicionScore}%</p>
                               </>

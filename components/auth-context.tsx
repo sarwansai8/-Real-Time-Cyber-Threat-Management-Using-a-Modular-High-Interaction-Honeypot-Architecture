@@ -1,30 +1,21 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useEffect, useState } from 'react'
+import type { PublicUser } from '@/lib/types'
 
-export interface PatientProfile {
-  id: string
-  email: string
-  firstName: string
-  lastName: string
-  dateOfBirth: string
-  gender: 'male' | 'female' | 'other'
-  phone: string
-  address: string
-  city: string
-  state: string
-  zipCode: string
-  bloodType: string
-  emergencyContact: string
-  registeredDate: string
-}
+export type PatientProfile = PublicUser
 
 interface AuthContextType {
   user: PatientProfile | null
   isLoggedIn: boolean
+  isLoading: boolean
   setUser: (user: PatientProfile | null) => void
-  login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, profile: Omit<PatientProfile, 'id' | 'registeredDate'>) => Promise<void>
+  login: (email: string, password: string) => Promise<PatientProfile>
+  register: (
+    email: string,
+    password: string,
+    profile: Omit<PatientProfile, 'id' | 'registeredDate' | 'email' | 'role' | 'verified'>
+  ) => Promise<PatientProfile>
   logout: () => Promise<void>
 }
 
@@ -34,7 +25,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PatientProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Load user session on mount
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -42,6 +32,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (response.ok) {
           const data = await response.json()
           setUser(data.user)
+        } else {
+          setUser(null)
         }
       } catch (error) {
         console.error('Auth check failed:', error)
@@ -49,7 +41,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false)
       }
     }
-    checkAuth()
+
+    void checkAuth()
   }, [])
 
   const login = async (email: string, password: string) => {
@@ -66,16 +59,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const data = await response.json()
     setUser(data.user)
-    
-    // Keep localStorage backup for backward compatibility
-    localStorage.setItem('medicalPortalUser', JSON.stringify(data.user))
+    return data.user
   }
 
-  const register = async (email: string, password: string, profile: Omit<PatientProfile, 'id' | 'registeredDate'>) => {
+  const register = async (
+    email: string,
+    password: string,
+    profile: Omit<PatientProfile, 'id' | 'registeredDate' | 'email' | 'role' | 'verified'>
+  ) => {
     const response = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        email,
         password,
         ...profile
       })
@@ -83,8 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!response.ok) {
       const error = await response.json()
-      // Include validation details if available
-      const errorMessage = error.details 
+      const errorMessage = error.details
         ? `${error.error}: ${error.details.join(', ')}`
         : error.error || 'Registration failed'
       throw new Error(errorMessage)
@@ -92,9 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const data = await response.json()
     setUser(data.user)
-    
-    // Keep localStorage backup for backward compatibility
-    localStorage.setItem('medicalPortalUser', JSON.stringify(data.user))
+    return data.user
   }
 
   const logout = async () => {
@@ -103,13 +96,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Logout error:', error)
     }
-    
+
     setUser(null)
-    localStorage.removeItem('medicalPortalUser')
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn: !!user, setUser, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoggedIn: !!user, isLoading, setUser, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

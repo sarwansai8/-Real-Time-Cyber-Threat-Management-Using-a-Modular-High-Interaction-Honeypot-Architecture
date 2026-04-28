@@ -21,6 +21,12 @@ export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
 
+  const persistNotifications = (nextNotifications: Notification[]) => {
+    setNotifications(nextNotifications)
+    setUnreadCount(nextNotifications.filter((n: Notification) => !n.read).length)
+    localStorage.setItem('portalNotifications', JSON.stringify(nextNotifications))
+  }
+
   useEffect(() => {
     // Load notifications from localStorage
     const storedNotifications = localStorage.getItem('portalNotifications')
@@ -58,12 +64,12 @@ export function NotificationCenter() {
       // Randomly add a notification (5% chance every 30 seconds)
       if (Math.random() < 0.05) {
         const newNotif = randomNotifications[Math.floor(Math.random() * randomNotifications.length)]
-        setNotifications(prev => [newNotif, ...prev].slice(0, 20))
-        setUnreadCount(prev => prev + 1)
-        
-        // Auto-save to localStorage
-        const updated = [newNotif, ...notifications].slice(0, 20)
-        localStorage.setItem('portalNotifications', JSON.stringify(updated))
+        setNotifications(prev => {
+          const nextNotifications = [newNotif, ...prev].slice(0, 20)
+          setUnreadCount(nextNotifications.filter((n: Notification) => !n.read).length)
+          localStorage.setItem('portalNotifications', JSON.stringify(nextNotifications))
+          return nextNotifications
+        })
       }
     }, 30000)
 
@@ -71,17 +77,13 @@ export function NotificationCenter() {
   }, [])
 
   const markAsRead = (id: string) => {
-    setNotifications(prev =>
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
-    )
-    setUnreadCount(prev => Math.max(0, prev - 1))
-    localStorage.setItem('portalNotifications', JSON.stringify(notifications))
+    const nextNotifications = notifications.map(n => n.id === id ? { ...n, read: true } : n)
+    persistNotifications(nextNotifications)
   }
 
   const clearNotification = (id: string) => {
-    const updated = notifications.filter(n => n.id !== id)
-    setNotifications(updated)
-    localStorage.setItem('portalNotifications', JSON.stringify(updated))
+    const nextNotifications = notifications.filter(n => n.id !== id)
+    persistNotifications(nextNotifications)
   }
 
   const getTypeColor = (type: string) => {
@@ -201,8 +203,8 @@ export function NotificationCenter() {
               <Button
                 onClick={() => {
                   setNotifications([])
-                  localStorage.removeItem('portalNotifications')
                   setUnreadCount(0)
+                  localStorage.removeItem('portalNotifications')
                 }}
                 variant="ghost"
                 size="sm"

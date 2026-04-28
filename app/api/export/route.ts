@@ -1,33 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
 import connectDB from '@/lib/db'
-import { User, Appointment, MedicalRecord, Vaccination } from '@/lib/models'
-import { 
-  generateCSV, 
-  formatAppointmentsForExport, 
-  formatMedicalRecordsForExport, 
+import { Appointment, MedicalRecord, User, Vaccination } from '@/lib/models'
+import {
+  formatAppointmentsForExport,
+  formatMedicalRecordsForExport,
   formatVaccinationsForExport,
-  generateHealthSummary 
+  generateCSV,
+  generateHealthSummary,
 } from '@/lib/export-utils'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-
-function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value || 
-                 request.headers.get('authorization')?.replace('Bearer ', '')
-  
-  if (!token) return null
-  
-  try {
-    return jwt.verify(token, JWT_SECRET) as any
-  } catch {
-    return null
-  }
-}
+import { logAudit } from '@/lib/audit-logger'
+import { getAuthenticatedUser, getClientIp, getUserAgent } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {
   try {
-    const user = getUserFromToken(request)
+    const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -35,18 +21,18 @@ export async function GET(request: NextRequest) {
     await connectDB()
 
     const { searchParams } = new URL(request.url)
-    const type = searchParams.get('type') // 'appointments', 'records', 'vaccinations', 'summary'
-    const format = searchParams.get('format') || 'csv' // 'csv' or 'txt'
+    const type = searchParams.get('type')
+    const format = searchParams.get('format') || 'csv'
 
-    // Fetch user data
     const userData = await User.findById(user.userId).select('-password').lean()
     if (!userData) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    let content: string
-    let filename: string
-    let contentType: string
+    let content = ''
+    let filename = ''
+    let contentType = ''
+    let exportedCount = 0
 
     switch (type) {
       case 'appointments': {
@@ -55,6 +41,7 @@ export async function GET(request: NextRequest) {
         content = generateCSV(formatted, Object.keys(formatted[0] || {}))
         filename = `appointments_${new Date().toISOString().split('T')[0]}.csv`
         contentType = 'text/csv'
+        exportedCount = appointments.length
         break
       }
 
@@ -64,6 +51,7 @@ export async function GET(request: NextRequest) {
         content = generateCSV(formatted, Object.keys(formatted[0] || {}))
         filename = `medical_records_${new Date().toISOString().split('T')[0]}.csv`
         contentType = 'text/csv'
+        exportedCount = records.length
         break
       }
 
@@ -73,6 +61,7 @@ export async function GET(request: NextRequest) {
         content = generateCSV(formatted, Object.keys(formatted[0] || {}))
         filename = `vaccinations_${new Date().toISOString().split('T')[0]}.csv`
         contentType = 'text/csv'
+        exportedCount = vaccinations.length
         break
       }
 
@@ -80,20 +69,21 @@ export async function GET(request: NextRequest) {
         const [appointments, records, vaccinations] = await Promise.all([
           Appointment.find({ userId: user.userId }).sort({ date: -1 }).lean(),
           MedicalRecord.find({ userId: user.userId }).sort({ date: -1 }).lean(),
-          Vaccination.find({ userId: user.userId }).sort({ date: -1 }).lean()
+          Vaccination.find({ userId: user.userId }).sort({ date: -1 }).lean(),
         ])
 
         content = generateHealthSummary({
           user: {
             ...userData,
-            registeredDate: userData.createdAt
+            registeredDate: userData.createdAt,
           },
           appointments,
           records,
-          vaccinations
+          vaccinations,
         })
         filename = `health_summary_${new Date().toISOString().split('T')[0]}.txt`
-        contentType = 'text/plain'
+        contentType = format === 'txt' ? 'text/plain' : 'text/plain'
+        exportedCount = appointments.length + records.length + vaccinations.length
         break
       }
 
@@ -101,14 +91,29 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid export type' }, { status: 400 })
     }
 
+    await logAudit({
+      userId: user.userId,
+      action: 'export',
+      resource: type || 'export',
+      details: {
+        method: 'GET',
+        endpoint: '/api/export',
+        format,
+        count: exportedCount,
+      },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+      complianceCategory: 'export',
+      severity: 'critical',
+    })
+
     return new NextResponse(content, {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Cache-Control': 'no-cache'
-      }
+        'Cache-Control': 'no-cache',
+      },
     })
-
   } catch (error: any) {
     console.error('Export error:', error)
     return NextResponse.json(

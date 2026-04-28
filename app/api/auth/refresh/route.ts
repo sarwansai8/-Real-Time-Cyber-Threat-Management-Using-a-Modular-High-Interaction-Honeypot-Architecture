@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
 import { verifyRefreshToken, generateCSRFToken } from '@/lib/advanced-security'
 import connectDB from '@/lib/db'
 import { User } from '@/lib/models'
 import { updateSessionActivity } from '@/lib/session-manager'
 import { refreshAccessToken } from '@/lib/token-rotation'
 import { rateLimit } from '@/lib/rate-limit'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
+import { createAuthToken, getClientIp } from '@/lib/auth'
 
 // POST - Refresh access token using refresh token (ENHANCED WITH TOKEN ROTATION)
 export async function POST(request: NextRequest) {
-  const clientIp = request.headers.get('x-forwarded-for') || 
-                   request.headers.get('x-real-ip') || 
-                   'unknown'
+  const clientIp = getClientIp(request)
 
   // Rate limiting - 10 refresh attempts per minute
   const rateLimitCheck = rateLimit({
@@ -109,16 +105,12 @@ export async function POST(request: NextRequest) {
     
     // Generate new access token
     const sessionId = request.cookies.get('session-id')?.value || ''
-    const newAccessToken = jwt.sign(
-      {
-        userId: (user as any)._id,
-        email: user.email,
-        role: user.role,
-        sessionId,
-      },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    )
+    const newAccessToken = createAuthToken({
+      userId: (user as any)._id.toString(),
+      email: user.email,
+      role: user.role,
+      sessionId,
+    })
     
     // Generate new CSRF token
     const newCSRFToken = generateCSRFToken(sessionId)

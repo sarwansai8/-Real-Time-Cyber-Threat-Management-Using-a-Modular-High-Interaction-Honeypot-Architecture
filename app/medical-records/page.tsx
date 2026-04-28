@@ -29,6 +29,7 @@ interface MedicalRecord {
 export default function MedicalRecordsPage() {
   const [records, setRecords] = useState<MedicalRecord[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState<MedicalRecord | null>(null)
   const [filterType, setFilterType] = useState<string>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -62,60 +63,10 @@ export default function MedicalRecordsPage() {
       })))
     } catch (err) {
       console.error('Fetch error:', err)
-      // Fallback to sample data
-      const samples: MedicalRecord[] = [
-        {
-          id: 'rec_1',
-          title: 'Blood Test Results',
-          type: 'lab',
-          date: '2025-11-10',
-          provider: 'City Medical Laboratory',
-          description: 'Complete blood count (CBC) and metabolic panel. All values within normal range.',
-          fileSize: '2.3 MB',
-          confidential: false
-        },
-        {
-          id: 'rec_2',
-          title: 'Chest X-Ray',
-          type: 'imaging',
-          date: '2025-10-25',
-          provider: 'Radiology Department',
-          description: 'Chest radiograph showing clear lungs. No abnormalities detected.',
-          fileSize: '4.8 MB',
-          confidential: false
-        },
-        {
-          id: 'rec_3',
-          title: 'Hypertension Diagnosis',
-          type: 'diagnosis',
-          date: '2025-10-15',
-          provider: 'Dr. Sarah Smith',
-          description: 'Diagnosed with Stage 1 Hypertension. Treatment plan initiated.',
-          fileSize: '1.2 MB',
-          confidential: true
-        },
-        {
-          id: 'rec_4',
-          title: 'Medication Prescription',
-          type: 'prescription',
-          date: '2025-10-15',
-          provider: 'Dr. Sarah Smith',
-          description: 'Prescription for Lisinopril 10mg. Take once daily.',
-          fileSize: '0.8 MB',
-          confidential: true
-        },
-        {
-          id: 'rec_5',
-          title: 'Allergy Test Results',
-          type: 'lab',
-          date: '2025-09-20',
-          provider: 'Allergy Clinic',
-          description: 'Skin prick test results. Allergic to pollen and dust mites.',
-          fileSize: '1.5 MB',
-          confidential: false
-        }
-      ]
-      setRecords(samples)
+      setRecords([])
+      toast.error('Failed to load medical records', {
+        description: err instanceof Error ? err.message : 'Please try again shortly.',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -181,6 +132,29 @@ export default function MedicalRecordsPage() {
     } catch (err: any) {
       toast.error('Failed to delete record', { description: err.message })
     }
+  }
+
+  const downloadRecord = (record: MedicalRecord) => {
+    const content = [
+      `Medical Record: ${record.title}`,
+      `Type: ${getTypeLabel(record.type)}`,
+      `Date: ${new Date(record.date).toLocaleDateString()}`,
+      `Provider: ${record.provider}`,
+      `Confidential: ${record.confidential ? 'Yes' : 'No'}`,
+      '',
+      'Description',
+      record.description || 'No description provided.'
+    ].join('\n')
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${record.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'medical_record'}.txt`
+    anchor.click()
+    URL.revokeObjectURL(url)
+
+    toast.success('Record downloaded', { description: `${record.title} has been downloaded.` })
   }
 
   const filteredRecords = records.filter(r => {
@@ -317,11 +291,33 @@ export default function MedicalRecordsPage() {
                     </div>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
-                    <Button variant="outline" size="icon" title="View">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="View"
+                      onClick={() => setSelectedRecord(record)}
+                    >
                       <Eye className="w-4 h-4" />
                     </Button>
-                    <Button variant="outline" size="icon" title="Download">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="Download"
+                      onClick={() => downloadRecord(record)}
+                    >
                       <Download className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="Delete"
+                      onClick={() => {
+                        if (confirm(`Delete "${record.title}"?`)) {
+                          void deleteRecord(record.id)
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
@@ -413,6 +409,53 @@ export default function MedicalRecordsPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedRecord} onOpenChange={(open) => !open && setSelectedRecord(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{selectedRecord?.title}</DialogTitle>
+            <DialogDescription>
+              Detailed medical record information
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedRecord && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Type</p>
+                  <p className="font-medium">{getTypeLabel(selectedRecord.type)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Date</p>
+                  <p className="font-medium">{new Date(selectedRecord.date).toLocaleDateString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Provider</p>
+                  <p className="font-medium">{selectedRecord.provider}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Confidential</p>
+                  <p className="font-medium">{selectedRecord.confidential ? 'Yes' : 'No'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Description</p>
+                <p className="leading-relaxed">{selectedRecord.description || 'No description provided.'}</p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button className="flex-1" onClick={() => downloadRecord(selectedRecord)}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={() => setSelectedRecord(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

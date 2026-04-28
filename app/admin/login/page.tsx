@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useAuth } from '@/components/auth-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -15,24 +16,30 @@ export default function AdminLoginPage() {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
+  const { login, logout } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setIsLoading(true)
 
-    // Simulate admin authentication
-    if (email === 'admin@health.gov' && password === 'admin123') {
-      localStorage.setItem('adminSession', JSON.stringify({
-        email,
-        timestamp: Date.now(),
-        role: 'admin'
-      }))
+    try {
+      const user = await login(email, password)
+
+      if (user.role !== 'admin') {
+        await logout()
+        setError('This account does not have admin access')
+        return
+      }
+
       router.push('/admin')
-    } else {
-      setError('Invalid admin credentials')
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to sign in to the admin portal'
+      setError(message)
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
   }
 
   return (
@@ -62,7 +69,7 @@ export default function AdminLoginPage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@health.gov"
+                  placeholder="admin@healthportal.com"
                   required
                 />
               </div>
@@ -85,8 +92,8 @@ export default function AdminLoginPage() {
 
               <div className="border-t border-border pt-4 mt-4">
                 <div className="bg-muted/50 p-3 rounded-lg text-xs space-y-1">
-                  <p><span className="font-semibold">Demo Admin Email:</span> admin@health.gov</p>
-                  <p><span className="font-semibold">Demo Password:</span> admin123</p>
+                  <p><span className="font-semibold">Admin Email:</span> admin@healthportal.com</p>
+                  <p><span className="font-semibold">Admin Password:</span> Admin123!</p>
                 </div>
               </div>
             </form>
