@@ -11,6 +11,8 @@ import {
 } from '@/lib/validations'
 import { getAuthenticatedUser, getClientIp, getUserAgent } from '@/lib/auth'
 import { escapeRegex } from '@/lib/utils'
+import { csrfProtection } from '@/lib/advanced-security'
+
 
 export async function GET(request: NextRequest) {
   try {
@@ -76,6 +78,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const csrfViolation = await csrfProtection(request)
+    if (csrfViolation) {
+      return csrfViolation
+    }
+
     const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -120,6 +127,11 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const csrfViolation = await csrfProtection(request)
+    if (csrfViolation) {
+      return csrfViolation
+    }
+
     const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -171,6 +183,11 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const csrfViolation = await csrfProtection(request)
+    if (csrfViolation) {
+      return csrfViolation
+    }
+
     const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

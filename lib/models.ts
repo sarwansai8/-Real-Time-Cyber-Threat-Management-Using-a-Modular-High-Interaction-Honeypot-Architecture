@@ -43,13 +43,16 @@ export interface IMedicalRecord extends Document {
   type: 'lab' | 'prescription' | 'diagnosis' | 'imaging' | 'other'
   date: Date
   provider: string
-  description: string
+  description: any // Changed to any to support EncryptedField object
   fileUrl?: string
   fileSize: string
   confidential: boolean
+  salt?: string
+  integrity?: any
   createdAt: Date
   updatedAt: Date
 }
+
 
 // Vaccination Interface
 export interface IVaccination extends Document {
@@ -179,10 +182,12 @@ const MedicalRecordSchema = new Schema<IMedicalRecord>({
   type: { type: String, enum: ['lab', 'prescription', 'diagnosis', 'imaging', 'other'], required: true },
   date: { type: Date, default: Date.now },
   provider: { type: String, required: true },
-  description: { type: String },
+  description: { type: Schema.Types.Mixed }, // Changed to Mixed to support encrypted object
   fileUrl: { type: String },
   fileSize: { type: String, default: '0 MB' },
   confidential: { type: Boolean, default: false },
+  salt: { type: String },
+  integrity: { type: Schema.Types.Mixed },
 }, { timestamps: true })
 
 const VaccinationSchema = new Schema<IVaccination>({

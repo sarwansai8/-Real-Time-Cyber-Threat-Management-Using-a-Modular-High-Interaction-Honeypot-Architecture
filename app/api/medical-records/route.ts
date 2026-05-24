@@ -11,6 +11,18 @@ import {
 } from '@/lib/validations'
 import { getAuthenticatedUser, getClientIp, getUserAgent } from '@/lib/auth'
 import { escapeRegex } from '@/lib/utils'
+import { encryptMedicalRecord, decryptMedicalRecord } from '@/lib/field-encryption'
+import { createIntegrityMetadata, verifyRecordIntegrity } from '@/lib/record-integrity'
+import { createSecurityEvent } from '@/lib/security-events'
+import { csrfProtection } from '@/lib/advanced-security'
+
+async function logSecurityEventSafely(request: NextRequest, payload: Parameters<typeof createSecurityEvent>[0]) {
+  try {
+    await createSecurityEvent(payload, { request })
+  } catch (error) {
+    console.error('Security event logging failed during medical records flow:', error)
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,7 +50,6 @@ export async function GET(request: NextRequest) {
       query.$or = [
         { title: { $regex: pattern, $options: 'i' } },
         { provider: { $regex: pattern, $options: 'i' } },
-        { description: { $regex: pattern, $options: 'i' } },
       ]
     }
 
@@ -54,9 +65,53 @@ export async function GET(request: NextRequest) {
         .lean(),
     ])
 
+    // Verify cryptographic integrity and decrypt records on-the-fly
+    const decryptedRecords = records.map((rec: any) => {
+      if (!rec.salt || !rec.integrity) {
+        // Return legacy plaintext records as-is, but mark them as unprotected
+        return { ...rec, integrityStatus: 'unprotected' }
+      }
+
+      // 1. Cryptographic integrity check
+      const verification = verifyRecordIntegrity(rec, rec.integrity)
+      if (verification.tampered) {
+        console.warn(`🚨 [INTEGRITY VIOLATION] Tamper detected on record ${rec._id}`)
+        
+        // Log critical security event for audit trail
+        logSecurityEventSafely(request, {
+          type: 'suspicious_behavior',
+          severity: 'critical',
+          ipAddress: getClientIp(request),
+          deviceInfo: {
+            userAgent: getUserAgent(request),
+            platform: 'Unknown',
+            language: 'Unknown',
+          },
+          sessionData: { sessionId: 'server', pageViews: 1, referrer: '' },
+          details: `HMAC-SHA-256 verification failed for medical record ${rec._id} (User: ${user.userId}). Critical data integrity warning!`,
+        })
+      }
+
+      // 2. AES-256-GCM Field Decryption
+      try {
+        const decrypted = decryptMedicalRecord(rec, user.userId, rec.salt)
+        return {
+          ...decrypted,
+          integrityStatus: verification.isValid ? 'verified' : 'tampered',
+        }
+      } catch (err) {
+        console.error(`Failed to decrypt medical record ${rec._id}:`, err)
+        return {
+          ...rec,
+          description: '[DECRYPTION_ERROR: Master key or user derivation salt mismatch]',
+          integrityStatus: 'error',
+        }
+      }
+    })
+
     return NextResponse.json({
       success: true,
-      records,
+      records: decryptedRecords,
       pagination: {
         page,
         limit,
@@ -75,6 +130,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // CSRF Protection
+    const csrfViolation = await csrfProtection(request)
+    if (csrfViolation) {
+      return csrfViolation
+    }
+
     const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -92,8 +153,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // 1. AES-256-GCM Encryption
+    const { encrypted, salt } = encryptMedicalRecord(validation.data, user.userId)
+
+    // 2. Cryptographic signature generation (HMAC-SHA-256)
+    const integrity = createIntegrityMetadata(encrypted, user.userId)
+
     const record = await MedicalRecord.create({
-      ...validation.data,
+      ...encrypted,
+      salt,
+      integrity,
       userId: user.userId,
     })
 
@@ -109,7 +178,13 @@ export async function POST(request: NextRequest) {
       severity: 'warning',
     })
 
-    return NextResponse.json({ success: true, record }, { status: 201 })
+    // Decrypt the record model before returning so UI gets clean fields
+    const decryptedRecord = {
+      ...decryptMedicalRecord(record.toObject(), user.userId, salt),
+      integrityStatus: 'verified',
+    }
+
+    return NextResponse.json({ success: true, record: decryptedRecord }, { status: 201 })
   } catch (error: any) {
     console.error('Create medical record error:', error)
     return NextResponse.json(
@@ -121,6 +196,12 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    // CSRF Protection
+    const csrfViolation = await csrfProtection(request)
+    if (csrfViolation) {
+      return csrfViolation
+    }
+
     const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -139,9 +220,49 @@ export async function PATCH(request: NextRequest) {
     }
 
     const { id, ...updates } = validation.data
+
+    // 1. Fetch existing record
+    const existingRecord = await MedicalRecord.findOne({ _id: id, userId: user.userId })
+    if (!existingRecord) {
+      return NextResponse.json({ error: 'Medical record not found' }, { status: 404 })
+    }
+
+    // 2. Decrypt existing record to merge update fields
+    let decrypted = existingRecord.toObject()
+    if (existingRecord.salt) {
+      try {
+        decrypted = decryptMedicalRecord(decrypted, user.userId, existingRecord.salt)
+      } catch (err) {
+        console.error('Failed to decrypt old record during update, using as-is:', err)
+      }
+    }
+
+    // 3. Construct updated decrypted state
+    const updatedDecrypted = {
+      ...decrypted,
+      ...updates,
+    }
+
+    // 4. Encrypt whole document
+    const { encrypted, salt: newSalt } = encryptMedicalRecord(
+      updatedDecrypted,
+      user.userId,
+      existingRecord.salt || undefined
+    )
+
+    // 5. Generate fresh HMAC-SHA-256 signature
+    const integrity = createIntegrityMetadata(encrypted, user.userId)
+
+    // 6. Update database record
     const record = await MedicalRecord.findOneAndUpdate(
       { _id: id, userId: user.userId },
-      { $set: updates },
+      { 
+        $set: {
+          ...encrypted,
+          salt: newSalt,
+          integrity,
+        }
+      },
       { new: true, runValidators: true }
     )
 
@@ -161,7 +282,13 @@ export async function PATCH(request: NextRequest) {
       severity: 'warning',
     })
 
-    return NextResponse.json({ success: true, record })
+    // Decrypt the record model before returning so UI gets clean fields
+    const decryptedRecord = {
+      ...decryptMedicalRecord(record.toObject(), user.userId, newSalt),
+      integrityStatus: 'verified',
+    }
+
+    return NextResponse.json({ success: true, record: decryptedRecord })
   } catch (error: any) {
     console.error('Update medical record error:', error)
     return NextResponse.json(
@@ -173,6 +300,12 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    // CSRF Protection
+    const csrfViolation = await csrfProtection(request)
+    if (csrfViolation) {
+      return csrfViolation
+    }
+
     const user = getAuthenticatedUser(request)
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -218,3 +351,4 @@ export async function DELETE(request: NextRequest) {
     )
   }
 }
+
