@@ -9,7 +9,7 @@ import { escapeRegex } from '@/lib/utils'
 export async function GET(request: NextRequest) {
   try {
     const user = getAuthenticatedUser(request)
-    if (!isAdmin(user)) {
+    if (!user || !isAdmin(user)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const user = getAuthenticatedUser(request)
-    if (!isAdmin(user)) {
+    if (!user || !isAdmin(user)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
@@ -142,7 +142,7 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const user = getAuthenticatedUser(request)
-    if (!isAdmin(user)) {
+    if (!user || !isAdmin(user)) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 

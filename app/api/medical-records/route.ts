@@ -228,7 +228,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // 2. Decrypt existing record to merge update fields
-    let decrypted = existingRecord.toObject()
+    let decrypted: any = existingRecord.toObject()
     if (existingRecord.salt) {
       try {
         decrypted = decryptMedicalRecord(decrypted, user.userId, existingRecord.salt)
