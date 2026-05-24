@@ -1,73 +1,68 @@
 # Stage 1: Dependencies
-CMD ["node", "server.js"]
-# Start the application
-
-  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-# Health check
-
-ENV HOSTNAME "0.0.0.0"
-ENV PORT 3000
-
-EXPOSE 3000
-# Expose port
-
-USER nextjs
-# Switch to non-root user
-
-RUN chown -R nextjs:nodejs /app
-# Set permissions
-
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/public ./public
-# Copy necessary files from builder
-
-RUN adduser --system --uid 1001 nextjs
-RUN addgroup --system --gid 1001 nodejs
-# Create non-root user
-
-WORKDIR /app
-FROM node:20-alpine AS runner
-# Stage 3: Production runner
-
-RUN pnpm run build
-# Build the application
-
-ENV NODE_ENV=production
-ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
-ENV JWT_SECRET=$JWT_SECRET
-ENV MONGODB_URI=$MONGODB_URI
-# Set environment variables for build
-
-ARG NEXT_PUBLIC_APP_URL
-ARG JWT_SECRET
-ARG MONGODB_URI
-# Build arguments for environment variables
-
-COPY . .
-# Copy application code
-
-COPY --from=deps /app/node_modules ./node_modules
-# Copy dependencies from deps stage
-
-RUN npm install -g pnpm
-# Install pnpm
-
-WORKDIR /app
-FROM node:20-alpine AS builder
-# Stage 2: Builder
-
-RUN pnpm install --frozen-lockfile
-# Install dependencies
-
-COPY package.json pnpm-lock.yaml ./
-# Copy package files
-
-RUN npm install -g pnpm
-# Install pnpm
-
-WORKDIR /app
-RUN apk add --no-cache libc6-compat
 FROM node:20-alpine AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Stage 2: Builder
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy application code
+COPY . .
+
+# Build arguments for environment variables
+ARG MONGODB_URI
+ARG JWT_SECRET
+ARG NEXT_PUBLIC_APP_URL
+
+# Set environment variables for build
+ENV MONGODB_URI=$MONGODB_URI
+ENV JWT_SECRET=$JWT_SECRET
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NODE_ENV=production
+
+# Build the application
+RUN npm run build
+
+# Stage 3: Production runner
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy necessary files from builder
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+# Set permissions
+RUN chown -R nextjs:nodejs /app
+
+# Switch to non-root user
+USER nextjs
+
+# Expose port
+EXPOSE 3000
+
+ENV PORT 3000
+ENV HOSTNAME "0.0.0.0"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Start the application
+CMD ["node", "server.js"]
+
 
